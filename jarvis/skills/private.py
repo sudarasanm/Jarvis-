@@ -165,6 +165,8 @@ def forget_detail(m, brain):
        r"^(?:please\s+)?clear\s+(?:the\s+)?search$")
 def clear(m, brain):
     field = m.groupdict().get("field") or "search"
+    if re.search(r"\bsearch\b", field, re.I) and not re.search(r"\b(?:chat|conversation)\b", field, re.I):
+        field = "search"  # "Pind from the left side of the search bar" -> the search box
     return action(screen.clear_field(field))
 
 
