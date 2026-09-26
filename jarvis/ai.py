@@ -19,7 +19,7 @@ import platform
 import time
 from datetime import datetime
 
-from . import computer
+from . import computer, screen, vision
 from .config import Config, load_settings
 
 SYSTEM_PROMPT = """You are {name}, the AI from Iron Man, now running on {title}'s {os} computer. \
@@ -38,10 +38,20 @@ Speaking rules, because every word you write is read aloud:
 - Plain spoken language. No markdown, lists, emoji, code or URLs.
 - Speech recognition makes mistakes. If a sentence is garbled, go with the likely meaning or ask.
 
-You can operate the computer with your tools: open apps and websites, close apps, type into the focused \
-window, press keys, check the weather, and draft emails. When {title} asks for something like that, use \
-the tools, then say briefly what you did. Emails are only drafted; {title} reviews and sends them. \
-If a tool reports a problem, say so plainly.
+You can operate the computer with your tools: open apps and websites, close apps, switch windows, type \
+into the focused window, press keys, click and scroll, check the weather, and draft emails. You can also see: \
+read_screen lists the buttons, links and text of the window in front (fast and exact), and look_at_screen \
+shows you a screenshot for anything read_screen misses, like profile pictures, video tiles or images.
+- For tasks inside apps and websites, work step by step like a person would: open it, wait for it to \
+load, read or look at the screen, click or type, then check the result before moving on. For example, to \
+play a film on Hotstar: open the Hotstar search page, wait, read the screen, click the film, click play.
+- When {title} asks what's on screen (the Netflix profiles, the accounts in Chrome, an answer on a web \
+page), read or look, then tell them. For accounts saved in Chrome, Brave or Edge, use browser_profiles.
+- Say briefly what you did. Emails are only drafted; {title} reviews and sends them.
+- Never type passwords or payment details and never buy anything; ask {title} to do those parts.
+- Windows administrator prompts ("Do you want to allow this app to make changes") are protected by \
+Windows and no program can click them; ask {title} to click those.
+- If a tool reports a problem, say so plainly.
 
 When {title} simply says your name or hello, you open the conversation: greet them in character, say \
 something that fits the time of day, and ask an engaging question or float an idea. Vary your openers.
@@ -113,6 +123,94 @@ TOOLS = [
         },
     },
     {
+        "name": "list_windows",
+        "description": "List the titles of all open windows.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "switch_window",
+        "description": "Bring an open window to the front, by part of its title (e.g. 'Brave', 'Netflix').",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "read_screen",
+        "description": "Read the window in front: its title plus the visible buttons, links, list items, text "
+                       "fields and text. Fast and exact. Use it before clicking, and to read answers on pages.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "look_at_screen",
+        "description": "Look at a screenshot of the screen and answer a question about it. Use when "
+                       "read_screen isn't enough: images, profile pictures, video thumbnails, layout.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"question": {"type": "string", "description": "What you want to know."}},
+            "required": ["question"],
+        },
+    },
+    {
+        "name": "click",
+        "description": "Click something on screen by its visible name or a short description, e.g. 'Allow', "
+                       "'Sign in', 'Sudarsan' (a profile), 'the play button'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "double": {"type": "boolean", "description": "Double-click instead."},
+                "right": {"type": "boolean", "description": "Right-click instead."},
+            },
+            "required": ["target"],
+        },
+    },
+    {
+        "name": "scroll",
+        "description": "Scroll the window under the mouse.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "string", "enum": ["up", "down"]},
+                "amount": {"type": "string", "enum": ["little", "normal", "lot"]},
+            },
+            "required": ["direction"],
+        },
+    },
+    {
+        "name": "wait",
+        "description": "Wait a few seconds, e.g. for a page or app to load or an answer to appear.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"seconds": {"type": "number", "description": "1 to 30."}},
+            "required": ["seconds"],
+        },
+    },
+    {
+        "name": "browser_profiles",
+        "description": "List the profiles (accounts) saved in Chrome, Brave or Edge on this computer.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"browser": {"type": "string", "enum": ["chrome", "brave", "edge"]}},
+            "required": ["browser"],
+        },
+    },
+    {
+        "name": "open_browser_profile",
+        "description": "Open Chrome, Brave or Edge as a specific profile (by profile name or email), "
+                       "optionally at a URL.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "browser": {"type": "string", "enum": ["chrome", "brave", "edge"]},
+                "profile": {"type": "string"},
+                "url": {"type": "string"},
+            },
+            "required": ["browser", "profile"],
+        },
+    },
+    {
         "name": "get_weather",
         "description": "Current weather and today's forecast. Leave city empty for the user's location.",
         "input_schema": {
@@ -123,7 +221,7 @@ TOOLS = [
 ]
 
 MAX_HISTORY_TURNS = 20
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 25  # multi-step screen tasks need room: open, wait, read, click...
 
 
 class Assistant:
@@ -190,6 +288,27 @@ class Assistant:
         if name == "compose_email":
             return computer.compose_email(args["to"], args.get("subject", ""), args.get("body", ""),
                                           client=self.config.email_client)
+        if name == "list_windows":
+            return screen.list_windows()
+        if name == "switch_window":
+            return screen.switch_to_window(args["name"])
+        if name == "read_screen":
+            return screen.read_screen()
+        if name == "look_at_screen":
+            return vision.describe(args.get("question", ""), self.config)
+        if name == "click":
+            return screen.click(args["target"], bool(args.get("double")), bool(args.get("right")),
+                                locate=lambda target: vision.locate(target, self.config))
+        if name == "scroll":
+            return screen.scroll(args.get("direction", "down"), args.get("amount", "normal"))
+        if name == "wait":
+            seconds = min(max(float(args.get("seconds", 2)), 0.5), 30)
+            time.sleep(seconds)
+            return f"Waited {seconds:g} seconds."
+        if name == "browser_profiles":
+            return computer.list_browser_profiles(args["browser"])
+        if name == "open_browser_profile":
+            return computer.open_browser_profile(args["browser"], args["profile"], args.get("url", ""))
         if name == "get_weather":
             from .skills import weather
 
@@ -333,7 +452,7 @@ def make_brain(config: Config) -> Failover | None:
     from .free_ai import make_gemini, make_ollama
 
     makers = {"claude": make_claude, "gemini": make_gemini, "ollama": make_ollama}
-    order = ["claude", "gemini", "ollama"]
+    order = ["gemini", "ollama", "claude"]  # free first; Claude only if it's set up and has credit
     preferred = str(config.ai_provider).lower()
     if preferred in makers:
         order.remove(preferred)

@@ -120,12 +120,13 @@ def test_make_brain_uses_preference_and_available_keys(monkeypatch):
 
     pytest.importorskip("anthropic")
     save_setting("anthropic_api_key", "sk-ant")
+    assert ai.make_brain(Config()).names == "Gemini, then Claude"  # free first by default
+    save_setting("ai_provider", "claude")
     assert ai.make_brain(Config()).names == "Claude, then Gemini"
-    save_setting("ai_provider", "gemini")
-    assert ai.make_brain(Config()).names == "Gemini, then Claude"
 
 
 def test_make_ollama_checks_the_model_is_downloaded(monkeypatch):
+    monkeypatch.setattr(free_ai, "ollama_exe", lambda: None)
     monkeypatch.setattr(free_ai, "get_json", lambda url, timeout=2: {"models": [{"name": "llama3.2:latest"}]})
     assert isinstance(free_ai.make_ollama(Config()), free_ai.Ollama)
     monkeypatch.setattr(free_ai, "get_json", lambda url, timeout=2: {"models": [{"name": "qwen2.5:3b"}]})
@@ -171,3 +172,9 @@ def test_post_json_over_real_http():
     finally:
         urllib.request.install_opener(None)
         server.shutdown()
+
+
+def test_gemini_tools_without_parameters_omit_them():
+    decls = {d["name"]: d for d in free_ai.Gemini(Config(), "k").tools[0]["functionDeclarations"]}
+    assert "parameters" not in decls["read_screen"] and "parameters" not in decls["list_windows"]
+    assert decls["click"]["parameters"]["required"] == ["target"]

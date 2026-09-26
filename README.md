@@ -46,6 +46,12 @@ To update later: `git pull`, then run the installer again.
 | "Jarvis" | start a conversation: chat, debate, brainstorm, ask anything |
 | "open chrome" / "open terminal" / "open hotstar" / "open photoshop" | open any app or website (unknown apps are found through the Start menu) |
 | "close chrome" / "close notepad" | close the app politely, so nothing is lost |
+| "click Allow" / "click on Amma" / "double click Recycle Bin" / "right click ..." | click things on screen by name (finds them exactly, or looks at the screen) |
+| "scroll down" / "scroll up a lot" | scroll |
+| "what windows are open" / "switch to Brave" | list or switch windows |
+| "open Netflix and tell me the profiles", "pick Amma" | see the screen and act on it step by step |
+| "which accounts are in Chrome" / "open Chrome as Work" | list browser profiles (Chrome, Brave, Edge) or open one |
+| "open Hotstar and play Jailer" / "open Claude, ask it X and read me the answer" | multi-step tasks in apps and websites |
 | "type hello world" | type into whatever text box is focused |
 | "press enter" / "press control t" / "press alt tab" | press keys |
 | "write an email to sudar at gmail dot com about the demo" | draft it in Gmail for you to review and send (never sends by itself) |
@@ -58,7 +64,7 @@ To update later: `git pull`, then run the installer again.
 
 ## AI brain (free options)
 
-Conversation, opinions, arguments, emails and multi-step tasks need an AI brain. Jarvis supports three, and the installer asks which one you want:
+Conversation, opinions, arguments, emails, seeing the screen and multi-step tasks need an AI brain. The installer sets up **Gemini as the main brain and Ollama as a free offline backup**:
 
 | Brain | Cost | Setup |
 |---|---|---|
@@ -66,7 +72,13 @@ Conversation, opinions, arguments, emails and multi-step tasks need an AI brain.
 | **Ollama** | **Free**, runs on your PC, works offline | Install [Ollama](https://ollama.com), run `ollama pull llama3.2` (needs 8 GB+ RAM) |
 | **Claude** | Paid API credit (separate from a Claude Pro subscription) | Key from [platform.claude.com](https://platform.claude.com) → `"anthropic_api_key"` |
 
-You can set up more than one. Jarvis uses `ai_provider` first, and **switches to the next automatically** when one runs out of credit or free quota. Keys live in `%USERPROFILE%\.jarvis.json`, **outside the code folder**, so they never end up on GitHub. Never paste a key into the code itself.
+Jarvis uses Gemini first, **switches to Ollama automatically** when Gemini's free limit runs out or the internet is down, and goes back to Gemini once it recovers. Claude is only used if you add a key with credit. Looking at the screen needs Gemini (or an Ollama vision model set as `ollama_vision_model`). Keys live in `%USERPROFILE%\.jarvis.json`, **outside the code folder**, so they never end up on GitHub. Never paste a key into the code itself.
+
+## What it can't do
+
+- **Windows administrator prompts** ("Do you want to allow this app to make changes to your device?") appear on a protected screen that Windows blocks all programs from reading or clicking. You'll have to click those yourself. Normal "Allow / Cancel" popups work.
+- It won't type passwords or payment details, or buy things. It asks you to do those parts.
+- Seeing the screen works on the main monitor, and reading buttons by name works on Windows.
 
 ## Hearing you better
 
@@ -95,6 +107,7 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 | `gemini_api_key` | | Free Gemini key (or set `GEMINI_API_KEY`) |
 | `gemini_model` | `gemini-flash-latest` | Gemini model |
 | `ollama_model` | `llama3.2` | Ollama model (e.g. `qwen2.5:7b` on a stronger PC) |
+| `ollama_vision_model` | | Ollama model that can see the screen when there's no Gemini key (e.g. `llama3.2-vision`) |
 | `anthropic_api_key` | | Claude API key (or set `ANTHROPIC_API_KEY`) |
 | `language` | `en-US` | Speech recognition language |
 | `mic_sensitivity` | `high` | `low`, `normal`, `high` or `max` |

@@ -19,6 +19,7 @@ from pathlib import Path
 from .ai import make_brain
 from .brain import Brain
 from .config import Config
+from .screen import make_dpi_aware
 from .voice import Listener, Speaker, list_microphones
 
 # Jarvis listens on this local port so only one copy runs, and so `--stop` can reach it.
@@ -152,6 +153,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{i}: {mic}")
         return
 
+    make_dpi_aware()
     background = args.background or sys.stdout is None  # pythonw.exe has no stdout
     if background:
         redirect_output_to_log()

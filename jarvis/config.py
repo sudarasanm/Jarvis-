@@ -65,6 +65,9 @@ class Config:
     gemini_model: str = _setting_field("gemini_model", "gemini-flash-latest")
     ollama_model: str = _setting_field("ollama_model", "llama3.2")
     ollama_url: str = _setting_field("ollama_url", "http://localhost:11434")
+    # Optional Ollama model that can see images (e.g. "llama3.2-vision"), used for looking at the
+    # screen when there's no Gemini key.
+    ollama_vision_model: str | None = _setting_field("ollama_vision_model")
     # Speech recognition language, e.g. en-US, en-GB, en-IN (Indian English), ta-IN (Tamil).
     language: str = _setting_field("language", "en-US")
     # How easily quiet speech is picked up: low, normal, high, max.

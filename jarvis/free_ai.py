@@ -57,9 +57,13 @@ class Gemini(Assistant):
         super().__init__(config)
         self.api_key = api_key
         self.post = post
-        self.tools = [{"functionDeclarations": [
-            {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]} for t in TOOLS
-        ]}]
+        declarations = []
+        for t in TOOLS:
+            declaration = {"name": t["name"], "description": t["description"]}
+            if t["input_schema"].get("properties"):  # Gemini rejects empty parameter objects
+                declaration["parameters"] = t["input_schema"]
+            declarations.append(declaration)
+        self.tools = [{"functionDeclarations": declarations}]
 
     def _turn(self, text: str) -> str | None:
         turn = [{"role": "user", "parts": [{"text": text}]}]
@@ -103,8 +107,12 @@ class Gemini(Assistant):
                 return "Gemini didn't accept the API key. Please check it."
             if e.status == 404:
                 return f"The model {self.config.gemini_model} isn't available. Try another gemini_model setting."
+            if e.status >= 500:
+                self.pause(30, "Gemini is having trouble")
+                return "Gemini is having trouble right now."
             return f"Gemini rejected that request. It said: {e.message}"
         except (urllib.error.URLError, TimeoutError, OSError):
+            self.pause(30, "can't reach Gemini")
             return OFFLINE
 
         self.remember(turn)
@@ -120,6 +128,7 @@ class Ollama(Assistant):
     def __init__(self, config: Config, post=post_json):
         super().__init__(config)
         self.post = post
+        self._started = False
         self.tools = [{"type": "function", "function": {
             "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in TOOLS]
 
@@ -156,6 +165,9 @@ class Ollama(Assistant):
                 return f"The model {self.config.ollama_model} isn't downloaded. Run: ollama pull {self.config.ollama_model}"
             return f"Ollama had a problem: {e.message}"
         except (urllib.error.URLError, TimeoutError, OSError):
+            if not self._started and start_ollama(self.config):
+                self._started = True
+                return self._turn(text)
             self.pause(60, "Ollama isn't running")
             return "I can't reach Ollama. Is it running?"
 
@@ -172,12 +184,49 @@ def make_gemini(config: Config) -> Gemini | None:
     return Gemini(config, key) if key else None
 
 
+def ollama_exe() -> str | None:
+    import shutil
+    from pathlib import Path
+
+    found = shutil.which("ollama")
+    if found:
+        return found
+    local = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+    return str(local) if os.environ.get("LOCALAPPDATA") and local.exists() else None
+
+
+def start_ollama(config: Config, wait: float = 15) -> bool:
+    """Start the Ollama server in the background if it's installed. True once it answers."""
+    import subprocess
+    import time
+
+    exe = ollama_exe()
+    if exe is None:
+        return False
+    print("(starting Ollama...)")
+    flags = 0x08000000 if os.name == "nt" else 0  # no console window on Windows
+    subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            get_json(f"{config.ollama_url}/api/tags")
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
 def make_ollama(config: Config) -> Ollama | None:
-    """Return an Ollama brain if Ollama is running on this PC, else None."""
+    """Return an Ollama brain if Ollama is installed (starting it if needed) with the model downloaded."""
     try:
         tags = get_json(f"{config.ollama_url}/api/tags")
     except Exception:
-        return None
+        if not start_ollama(config):
+            return None
+        try:
+            tags = get_json(f"{config.ollama_url}/api/tags")
+        except Exception:
+            return None
     names = {m.get("name", "") for m in tags.get("models", [])}
     wanted = config.ollama_model
     if not any(n == wanted or n.split(":")[0] == wanted for n in names):

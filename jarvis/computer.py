@@ -273,3 +273,91 @@ def compose_email(to: str, subject: str = "", body: str = "", client: str = "gma
         url = f"mailto:{to}?" + urllib.parse.urlencode({"subject": subject, "body": body}, quote_via=urllib.parse.quote)
     open_url(url)
     return f"I've drafted the email to {to}. Have a look and hit send when you're happy."
+
+
+# --- browser profiles (Chrome, Brave, Edge) -------------------------------------------------------
+
+BROWSERS = {
+    # key: (Windows data dir under %LOCALAPPDATA%, macOS dir under ~/Library/Application Support,
+    #       Linux dir under ~/.config, Windows exe, macOS app name)
+    "chrome": (r"Google\Chrome\User Data", "Google/Chrome", "google-chrome", "chrome", "Google Chrome"),
+    "brave": (r"BraveSoftware\Brave-Browser\User Data", "BraveSoftware/Brave-Browser",
+              "BraveSoftware/Brave-Browser", "brave", "Brave Browser"),
+    "edge": (r"Microsoft\Edge\User Data", "Microsoft Edge", "microsoft-edge", "msedge", "Microsoft Edge"),
+}
+
+
+def _browser(name: str) -> str | None:
+    key = _normalize(name)
+    for browser in BROWSERS:
+        if browser in key:
+            return browser
+    return None
+
+
+def _user_data_dir(browser: str):
+    import os
+    from pathlib import Path
+
+    win, mac, linux = BROWSERS[browser][:3]
+    if SYSTEM == "Windows":
+        return Path(os.environ.get("LOCALAPPDATA", ""), *win.split("\\"))
+    if SYSTEM == "Darwin":
+        return Path.home() / "Library" / "Application Support" / mac
+    return Path.home() / ".config" / linux
+
+
+def browser_profiles(name: str) -> list[dict]:
+    """[{'dir': 'Profile 1', 'name': 'Work', 'email': 'me@x.com', 'full_name': 'Me'}] for a browser."""
+    import json
+
+    browser = _browser(name)
+    if browser is None:
+        raise ValueError(f"I only know Chrome, Brave and Edge profiles, not {name}.")
+    path = _user_data_dir(browser) / "Local State"
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    cache = state.get("profile", {}).get("info_cache", {})
+    return [
+        {"dir": d, "name": info.get("name", d), "email": info.get("user_name", ""),
+         "full_name": info.get("gaia_name", "")}
+        for d, info in cache.items()
+    ]
+
+
+def list_browser_profiles(name: str) -> str:
+    profiles = browser_profiles(name)
+    if not profiles:
+        return f"I couldn't find any {name} profiles on this computer."
+    described = []
+    for p in profiles:
+        extra = ", ".join(x for x in (p["full_name"], p["email"]) if x and x != p["name"])
+        described.append(f"{p['name']} ({extra})" if extra else p["name"])
+    return f"{name.capitalize()} has {len(profiles)} profile{'s' if len(profiles) != 1 else ''}: " + "; ".join(described)
+
+
+def open_browser_profile(name: str, profile: str, url: str = "") -> str:
+    browser = _browser(name)
+    if browser is None:
+        return f"I only know Chrome, Brave and Edge profiles, not {name}."
+    wanted = _normalize(profile)
+    profiles = browser_profiles(browser)
+    match = next((p for p in profiles if wanted in (_normalize(p["name"]), _normalize(p["email"]),
+                                                     _normalize(p["full_name"]), _normalize(p["dir"]))), None)
+    match = match or next((p for p in profiles if wanted and any(
+        wanted in _normalize(p[k]) for k in ("name", "email", "full_name"))), None)
+    if match is None:
+        return f"There's no {name} profile called {profile}. " + list_browser_profiles(browser)
+    flag = f"--profile-directory={match['dir']}"
+    extra = [url] if url else []
+    exe, app = BROWSERS[browser][3], BROWSERS[browser][4]
+    if SYSTEM == "Windows":
+        subprocess.Popen(["cmd", "/c", "start", "", exe, flag, *extra], creationflags=0x08000000)  # no console
+    elif SYSTEM == "Darwin":
+        subprocess.Popen(["open", "-na", app, "--args", flag, *extra])
+    else:
+        subprocess.Popen([BROWSERS[browser][2], flag, *extra], start_new_session=True)
+    time.sleep(1.5)
+    return f"Opening {name} as {match['name']}."

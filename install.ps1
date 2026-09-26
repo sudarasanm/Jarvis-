@@ -78,36 +78,55 @@ function Read-Secret($prompt) {
     return "$plain".Trim()
 }
 
-$hasBrain = & $venvPython -c "from jarvis.config import load_settings; print('ai_provider' in load_settings())"
-if ("$hasBrain".Trim() -ne "True") {
+# Brains: Google Gemini (free, main) + Ollama (free, offline backup). Claude is optional and paid.
+$hasGemini = & $venvPython -c "import os; from jarvis.config import load_settings; print(bool(os.environ.get('GEMINI_API_KEY') or load_settings().get('gemini_api_key')))"
+if ("$hasGemini".Trim() -ne "True") {
     Write-Host ""
-    Write-Host "Jarvis needs an AI brain to hold conversations. Which one?"
-    Write-Host "  1) Google Gemini  - FREE, recommended. Needs a free key from https://aistudio.google.com/apikey"
-    Write-Host "  2) Ollama         - FREE, runs on this PC, works offline. Needs 8 GB+ RAM and a 2 GB download"
-    Write-Host "  3) Claude         - paid Anthropic API key with credit"
-    Write-Host "  4) Skip for now   - only built-in commands (time, weather, open/close apps...)"
-    $choice = Read-Host "Choose 1-4 (Enter = 1)"
-    if ($choice -eq "" -or $choice -eq "1") {
-        Write-Host "Open https://aistudio.google.com/apikey, sign in with Google, click 'Create API key' and copy it."
-        Start-Process "https://aistudio.google.com/apikey"
-        $key = Read-Secret "Paste the Gemini API key"
-        if ($key) { Save-Setting "gemini_api_key" $key; Save-Setting "ai_provider" "gemini"; Say "Gemini key saved." }
-    } elseif ($choice -eq "2") {
-        $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
-        if (-not (Test-Path $ollama) -and -not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+    Write-Host "Jarvis's main brain is Google Gemini, which is FREE (no card needed)."
+    Write-Host "Your browser will open https://aistudio.google.com/apikey : sign in with Google, click"
+    Write-Host "'Create API key', copy it and paste it here. Press Enter to skip."
+    Start-Process "https://aistudio.google.com/apikey"
+    $key = Read-Secret "Gemini API key"
+    if ($key) { Save-Setting "gemini_api_key" $key; Say "Gemini key saved." }
+}
+Save-Setting "ai_provider" "gemini"
+
+$ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+if (-not (Test-Path $ollama)) {
+    $found = Get-Command ollama -ErrorAction SilentlyContinue
+    if ($found) { $ollama = $found.Source }
+}
+$skipOllama = & $venvPython -c "from jarvis.config import load_settings; print(load_settings().get('ollama_setup') == 'skip')"
+if (-not (Test-Path $ollama) -and "$skipOllama".Trim() -ne "True") {
+    Write-Host ""
+    Write-Host "Ollama is a FREE backup brain that runs on this PC, so Jarvis keeps talking when Gemini's"
+    Write-Host "free limit runs out or the internet is down. It needs about 2 GB of disk and 8 GB+ of RAM."
+    $answer = Read-Host "Install Ollama now? (Y/n)"
+    if ($answer -eq "" -or $answer -match "^[yY]") {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
             Say "Installing Ollama..."
             winget install -e --id Ollama.Ollama --accept-package-agreements --accept-source-agreements
+        } else {
+            Write-Host "Please install Ollama from https://ollama.com/download and run this installer again."
         }
-        if (-not (Test-Path $ollama)) { $ollama = "ollama" }
-        Say "Downloading the llama3.2 model (about 2 GB)..."
-        & $ollama pull llama3.2
-        if ($LASTEXITCODE -eq 0) { Save-Setting "ai_provider" "ollama"; Say "Ollama is ready." }
-        else { Write-Host "Ollama setup didn't finish. Start the Ollama app, then run: ollama pull llama3.2" }
-    } elseif ($choice -eq "3") {
-        Write-Host "Get a key at https://platform.claude.com -> API Keys (the account needs credit)."
-        $key = Read-Secret "Paste the Anthropic API key (starts with sk-ant-)"
-        if ($key) { Save-Setting "anthropic_api_key" $key; Save-Setting "ai_provider" "claude"; Say "Claude key saved." }
+    } else {
+        Save-Setting "ollama_setup" "skip"
     }
+}
+if (Test-Path $ollama) {
+    $model = & $venvPython -c "from jarvis.config import Config; print(Config().ollama_model)"
+    $model = "$model".Trim()
+    & $ollama list 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
+        Start-Sleep -Seconds 5
+    }
+    $have = (& $ollama list 2>$null | Out-String)
+    if ($have -notmatch [regex]::Escape($model)) {
+        Say "Downloading the $model model for Ollama (about 2 GB, one time)..."
+        & $ollama pull $model
+    }
+    Say "Ollama backup brain is ready."
 }
 
 $hasLang = & $venvPython -c "from jarvis.config import load_settings; print('language' in load_settings())"

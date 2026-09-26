@@ -2,8 +2,10 @@
 
 import re
 
-from .. import computer
+from .. import computer, screen, vision
 from ..brain import Response, skill
+
+ORDINALS = re.compile(r"\b(first|second|third|fourth|fifth|last|next|previous|top|bottom|\d+(st|nd|rd|th))\b", re.I)
 
 
 def _complex(text: str, brain) -> bool:
@@ -48,3 +50,35 @@ def type_(m, brain):
 @skill(r"^(?:press|hit)\s+(?P<keys>.+)$")
 def press(m, brain):
     return Response(computer.press_keys(m["keys"]))
+
+
+@skill(r"^(?:(?P<how>double|right)[ -])?(?:click|tap)(?: on)?\s+(?:the\s+)?(?P<target>.+?)(?:\s+button)?$")
+def click(m, brain):
+    # "click the second profile" needs judgement about the screen: let the AI look.
+    if brain.fallback is not None and ORDINALS.search(m["target"]):
+        return None
+    how = (m["how"] or "").lower()
+    return Response(screen.click(m["target"], double=how == "double", right=how == "right",
+                                 locate=lambda target: vision.locate(target, brain.config)))
+
+
+@skill(r"^scroll (?P<dir>up|down)(?: (?:a )?(?P<amount>little|lot|bit))?$")
+def scroll(m, brain):
+    amount = {"bit": "little"}.get(m["amount"], m["amount"] or "normal")
+    return Response(screen.scroll(m["dir"].lower(), amount))
+
+
+@skill(r"^switch (?:to|over to)\s+(?P<name>.+)$")
+def switch(m, brain):
+    return Response(screen.switch_to_window(m["name"]))
+
+
+@skill(r"\b(?:what|which) windows\b", r"^(?:list|show) (?:all )?(?:the |my )?(?:open )?windows$")
+def windows(m, brain):
+    return Response(screen.list_windows())
+
+
+@skill(r"\b(?:list|show|which|what)\b.*\b(?:profiles?|accounts?|users?)\b.*\b(?P<browser>chrome|brave|edge)\b",
+       r"\b(?P<browser>chrome|brave|edge)\b.*\b(?:profiles?|accounts?|users?)\b")
+def profiles(m, brain):
+    return Response(computer.list_browser_profiles(m["browser"].lower()))
