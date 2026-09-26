@@ -15,6 +15,7 @@ def fresh_gemini_limits(monkeypatch):
     from jarvis import free_ai
 
     monkeypatch.setattr(free_ai, "_gemini_resting", {})
+    monkeypatch.setattr(free_ai, "_thinking_choice", {})
     from jarvis import ai
 
     monkeypatch.setattr(ai, "current_context", lambda: "")

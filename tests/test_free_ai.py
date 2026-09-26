@@ -237,3 +237,14 @@ def test_clean_speech():
     assert ai.clean_speech('Sure. {"name": "list_windows", "parameters": {}} Done!') == "Sure. Done!"
     assert ai.clean_speech("**Closed** it.\n[Actions: close_app(x) -> Closed x.]") == "Closed it."
     assert ai.clean_speech("See https://ai.google.dev/docs for more") == "See the link for more"
+
+
+def test_gemini_thinking_setting_falls_back_per_model():
+    post = FakePost(free_ai.HTTPError(400, 'Invalid JSON payload received. Unknown name "thinkingLevel"'),
+                    gemini_reply({"text": "Hi."}), gemini_reply({"text": "Again."}))
+    g = free_ai.Gemini(Config(), "k", post=post)
+    assert g("hello") == "Hi."
+    assert post.requests[0][1]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+    assert post.requests[1][1]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
+    g("again")
+    assert post.requests[2][1]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}  # remembered

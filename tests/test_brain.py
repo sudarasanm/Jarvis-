@@ -142,8 +142,14 @@ class FakeListener:
     def __init__(self, lines):
         self.lines = iter(lines)
 
-    def listen(self, timeout=None, phrase_limit=8, pause=0.7):
+    def listen(self, timeout=None):
         return next(self.lines)
+
+    def mute(self):
+        self.muted = True
+
+    def unmute(self):
+        self.muted = False
 
 
 def run_voice(brain, lines):
@@ -166,7 +172,7 @@ def test_saying_the_name_starts_a_conversation_without_wake_words():
         def __call__(self, text):
             return f"Interesting: {text}"
 
-    b = Brain(Config(), fallback=FakeClaude())
+    b = Brain(Config(conversation_timeout=0), fallback=FakeClaude())
     said = run_voice(b, [
         "some tv noise",           # ignored: not in a conversation
         "Jarvis",                  # Claude opens the conversation
@@ -189,3 +195,34 @@ def test_bye_ends_conversation():
     assert said[1].startswith("It's")
     assert "say my name" in said[2]
     assert len(said) == 3  # the joke request was ignored: conversation over
+
+
+def test_background_notices_are_spoken_between_turns():
+    b = Brain(Config())
+    b.notify("Docker Desktop finished installing.")
+    said = run_voice(b, [None])
+    assert said == ["Docker Desktop finished installing."]
+
+
+def test_listener_drops_its_own_voice_and_keeps_speech_captured_while_busy():
+    import types
+
+    from jarvis.voice import Listener
+
+    listener = Listener.__new__(Listener)  # no microphone needed
+    import queue
+
+    listener.phrases, listener.speaking, listener.ignore_before = queue.Queue(), False, 0.0
+    audio = types.SimpleNamespace(frame_data=b"\0" * 32000 * 2, sample_rate=16000, sample_width=2)  # 2 s
+
+    listener.mute()
+    listener._offer(audio, ended=1000.0)       # recorded while Jarvis was talking
+    listener.unmute()
+    assert listener.phrases.empty()
+
+    listener.ignore_before = 999.0
+    listener._offer(audio, ended=1000.5)       # started before we finished talking: our echo
+    assert listener.phrases.empty()
+    listener._offer(audio, ended=1002.0)       # the user, after Jarvis finished
+    listener._offer(audio, ended=1004.0)       # and more while Jarvis was busy thinking
+    assert listener.phrases.qsize() == 2

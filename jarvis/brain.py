@@ -7,6 +7,7 @@ if configured).
 
 from __future__ import annotations
 
+import queue
 import re
 from dataclasses import dataclass
 from typing import Callable
@@ -27,8 +28,10 @@ class Response:
     exit: bool = False
 
 
-# A handler may return None to pass, letting later skills or Claude handle the request.
+# A handler may return None to pass to later skills, or ASK_AI to hand the request straight to the AI
+# (it needs the conversation's context, e.g. "close it").
 Handler = Callable[[re.Match, "Brain"], "Response | None"]
+ASK_AI = object()
 
 _SKILLS: list[tuple[re.Pattern, Handler]] = []
 
@@ -81,7 +84,24 @@ class Brain:
         self.fallback = fallback
         self._pending: Callable[[], Response] | None = None
         self._pending_reply: Callable[[str], Response] | None = None
+        # Things to say when they happen in the background (e.g. an install finishing).
+        self._notices: "queue.Queue[str]" = queue.Queue()
         from . import skills  # noqa: F401  (importing registers every skill)
+
+        if hasattr(fallback, "set_notifier"):
+            fallback.set_notifier(self.notify)
+
+    def notify(self, text: str) -> None:
+        """Queue something for Jarvis to say at the next chance (safe to call from any thread)."""
+        self._notices.put(text)
+
+    def pop_notices(self) -> list[str]:
+        out = []
+        while True:
+            try:
+                out.append(self._notices.get_nowait())
+            except queue.Empty:
+                return out
 
     @property
     def awaiting_reply(self) -> bool:
@@ -143,6 +163,8 @@ class Brain:
             match = pattern.search(text)
             if match:
                 response = handler(match, self)
+                if response is ASK_AI:
+                    break
                 if response is not None:
                     return response
 

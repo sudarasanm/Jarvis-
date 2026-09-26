@@ -33,29 +33,41 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
         print("Listening... just speak (no wake word needed). Ctrl+C to quit.")
     else:
         print(f'Listening... say "{name}" to start a conversation, or "Hey {name}, <command>". Ctrl+C to quit.')
+
+    def say(text: str) -> None:
+        listener.mute()  # don't hear ourselves
+        try:
+            speaker.say(text)
+        finally:
+            listener.unmute()
+
     # In a conversation Jarvis answers without hearing its name, until you're quiet for a while or say "bye".
     in_conversation = always_awake
+    last_activity = time.time()
     while True:
-        if in_conversation:
-            heard = listener.listen(timeout=brain.config.conversation_timeout, phrase_limit=20, pause=1.0)
-        else:
-            heard = listener.listen(phrase_limit=8, pause=0.8)
+        for notice in brain.pop_notices():  # e.g. "Docker finished installing"
+            say(notice)
+        heard = listener.listen(timeout=0.5)
         if heard is None:
-            if in_conversation and not always_awake:
+            if in_conversation and not always_awake and time.time() - last_activity > brain.config.conversation_timeout:
                 print(f'(conversation ended; say "{name}" when you need me)')
-            in_conversation = always_awake
+                in_conversation = False
             continue
         print(f"You: {heard}")
         addressed, command = brain.strip_wake_word(heard)
         if not (addressed or in_conversation):
             print(f'(no "{name}" heard, ignoring)')
             continue
+        begun = time.time()
         if addressed and not command:
-            speaker.say(greeting(brain))
+            say(greeting(brain))
             in_conversation = True
+            last_activity = time.time()
             continue
         response = brain.handle(command)
-        speaker.say(response.text)
+        print(f"(answered in {time.time() - begun:.1f}s)")
+        say(response.text)
+        last_activity = time.time()
         if response.exit:
             return
         in_conversation = always_awake or not response.sleep

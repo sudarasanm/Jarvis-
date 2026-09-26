@@ -7,6 +7,9 @@ and without SpeechRecognition/PyAudio the main loop uses typed input.
 from __future__ import annotations
 
 import platform
+import queue
+import threading
+import time
 
 
 BRITISH_VOICE_HINTS = ("george", "daniel", "hazel", "en-gb", "english (great britain)", "united kingdom")
@@ -113,14 +116,21 @@ def list_microphones() -> list[str]:
 
 
 class Listener:
-    """Wraps SpeechRecognition + a microphone. Raises on init if unavailable."""
+    """Always-on microphone.
 
-    def __init__(self, language: str = "en-US", sensitivity: str = "high", device_index: int | None = None):
+    A background thread records phrases non-stop into a queue, so nothing you say is lost while
+    Jarvis is recognising, thinking or talking. Sound recorded while Jarvis itself is speaking is
+    thrown away, so it never answers its own voice. Raises on init if no microphone is available.
+    """
+
+    def __init__(self, language: str = "en-US", sensitivity: str = "high", device_index: int | None = None,
+                 start: bool = True):
         import speech_recognition as sr
 
         self.sr = sr
         self.language = language
         self.recognizer = sr.Recognizer()
+        self.recognizer.operation_timeout = 8  # never hang waiting for Google's speech service
         self.microphone = sr.Microphone(device_index=device_index)
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
@@ -128,27 +138,72 @@ class Listener:
         self.recognizer.energy_threshold = max(self.recognizer.energy_threshold * factor, 30)
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.dynamic_energy_adjustment_ratio = ratio
+        self.recognizer.pause_threshold = 0.8  # seconds of silence that end a phrase
         self.recognizer.non_speaking_duration = 0.6  # audio kept from before speech starts
+        self.phrase_limit = 15
+        self.phrases: "queue.Queue" = queue.Queue()
+        self.speaking = False
+        self.ignore_before = 0.0
+        if start:
+            threading.Thread(target=self._capture, name="microphone", daemon=True).start()
 
-    def listen(self, timeout: float | None = None, phrase_limit: float = 8, pause: float = 0.8) -> str | None:
-        """Record one phrase and return its transcript, or None if nothing intelligible was heard.
+    # --- recording (background thread) ---
 
-        pause: seconds of silence that end a phrase (longer in conversation, so you can think mid-sentence).
-        """
-        self.recognizer.pause_threshold = pause
+    def _capture(self) -> None:
         with self.microphone as source:
-            print("(listening...)")
+            while True:
+                try:
+                    audio = self.recognizer.listen(source, phrase_time_limit=self.phrase_limit)
+                except Exception as e:
+                    print(f"(microphone error: {e!r})")
+                    time.sleep(1)
+                    continue
+                self._offer(audio, time.time())
+
+    def _offer(self, audio, ended: float) -> None:
+        duration = len(audio.frame_data) / float(audio.sample_rate * audio.sample_width)
+        started = ended - duration
+        if self.speaking or started < self.ignore_before:
+            return  # that was Jarvis talking
+        self.phrases.put((started, duration, audio))
+
+    # --- while Jarvis talks ---
+
+    def mute(self) -> None:
+        self.speaking = True
+
+    def unmute(self) -> None:
+        self.speaking = False
+        self.ignore_before = time.time() + 0.25  # the tail of our own voice still echoing
+        while True:
             try:
-                audio = self.recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
-            except self.sr.WaitTimeoutError:
-                return None
-        print("(recognizing...)")
+                self.phrases.get_nowait()
+            except queue.Empty:
+                break
+
+    # --- recognising (main thread) ---
+
+    def listen(self, timeout: float | None = None) -> str | None:
+        """The next thing said, as text. None if nothing arrives within `timeout` or it wasn't words."""
+        try:
+            _started, duration, audio = self.phrases.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        return self.recognize(audio, duration)
+
+    def recognize(self, audio, duration: float = 0.0) -> str | None:
+        begun = time.time()
         if audio.sample_width == 2:
             audio = self.sr.AudioData(boost_quiet_audio(audio.get_raw_data()), audio.sample_rate, 2)
         try:
-            return self.recognizer.recognize_google(audio, language=self.language)
+            text = self.recognizer.recognize_google(audio, language=self.language)
         except self.sr.UnknownValueError:
             return None
-        except self.sr.RequestError:
-            print("(speech service unreachable)")
+        except self.sr.RequestError as e:
+            print(f"(speech service unreachable: {e})")
             return None
+        except Exception as e:  # timeouts and network trouble: never freeze the loop
+            print(f"(speech recognition failed: {e!r})")
+            return None
+        print(f"(heard {duration:.1f}s of speech, recognised in {time.time() - begun:.1f}s)")
+        return text

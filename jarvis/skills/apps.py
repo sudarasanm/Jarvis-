@@ -3,7 +3,7 @@
 import re
 
 from .. import computer, screen, vision
-from ..brain import Response, skill
+from ..brain import ASK_AI, Response, skill
 
 ORDINALS = re.compile(r"\b(first|second|third|fourth|fifth|last|next|previous|top|bottom|\d+(st|nd|rd|th))\b", re.I)
 
@@ -29,7 +29,7 @@ def tabs(m, brain):
        rf"^close\s+(?:the\s+)?tab\s+(?:called\s+|named\s+)?(?P<title>.+?)\s*{BROWSER}$")
 def close_tab(m, brain):
     if _complex(m["title"], brain):
-        return None
+        return ASK_AI
     browser = m.groupdict().get("browser")
     return Response(screen.close_tab(m["title"], browser.split()[-1].lower() if browser else None))
 
@@ -43,7 +43,7 @@ def switch_tab(m, brain):
 @skill(r"\b(?:write|send|compose|draft)\b.*\be-?mail\b")
 def email(m, brain):
     if brain.fallback is not None:
-        return None  # Claude writes a much better email than a template
+        return ASK_AI  # the AI writes a much better email than a template
     text = m.string
     to = re.search(r"\bto\s+(?P<to>.+?)(?:\s+(?:about|saying|regarding|that)\s+(?P<topic>.+))?$", text, re.I)
     if not to:
@@ -58,13 +58,15 @@ def _email_to(to: str, topic: str, brain) -> Response:
 @skill(r"^(?:please\s+)?(?:open|launch|go to)\s+(?P<name>.+?)(?:\s+(?:for me|please))?$")
 def open_(m, brain):
     if _complex(m["name"], brain):
-        return None
+        return ASK_AI
     return Response(computer.open_app(m["name"]))
 
 
 @skill(r"^(?:please\s+)?(?:close|quit|exit|kill)\s+(?P<name>.+?)(?:\s+(?:for me|please))?$")
 def close(m, brain):
-    if _complex(m["name"], brain) or m["name"].lower() in {"yourself", "jarvis"}:
+    if _complex(m["name"], brain):
+        return ASK_AI
+    if m["name"].lower() in {"yourself", "jarvis"}:
         return None  # "close yourself" is handled by the quit skill
     return Response(computer.close_app(m["name"]))
 
@@ -83,7 +85,7 @@ def press(m, brain):
 def click(m, brain):
     # "click the second profile" needs judgement about the screen: let the AI look.
     if brain.fallback is not None and ORDINALS.search(m["target"]):
-        return None
+        return ASK_AI
     how = (m["how"] or "").lower()
     return Response(screen.click(m["target"], double=how == "double", right=how == "right",
                                  locate=lambda target: vision.locate(target, brain.config)))

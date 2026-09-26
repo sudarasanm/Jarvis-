@@ -127,7 +127,8 @@ def test_vision_locate_and_describe_use_gemini(monkeypatch):
 
     def fake_post(url, body, headers=None, timeout=120):
         sent.append(body)
-        text = '{"found": true, "box_2d": [0, 0, 1000, 1000]}' if "generationConfig" in body else "Three profiles."
+        wants_json = "responseMimeType" in body.get("generationConfig", {})
+        text = '{"found": true, "box_2d": [0, 0, 1000, 1000]}' if wants_json else "Three profiles."
         return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
 
     from jarvis import free_ai
@@ -136,7 +137,8 @@ def test_vision_locate_and_describe_use_gemini(monkeypatch):
     assert vision.describe("How many profiles?", Config()) == "Three profiles."
     image_part = sent[0]["contents"][0]["parts"][0]["inlineData"]
     assert image_part == {"mimeType": "image/jpeg", "data": "SlBFRw=="}
-    assert sent[0]["generationConfig"] == {"responseMimeType": "application/json"}
+    assert sent[0]["generationConfig"] == {"responseMimeType": "application/json",
+                                           "thinkingConfig": {"thinkingLevel": "low"}}
 
 
 def test_vision_without_any_vision_brain(monkeypatch):

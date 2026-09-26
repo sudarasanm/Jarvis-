@@ -21,7 +21,7 @@ import re
 import time
 from datetime import datetime
 
-from . import computer, screen, vision
+from . import computer, screen, system, vision
 from .config import Config, load_settings
 
 SYSTEM_PROMPT = """You are {name}, the AI from Iron Man, now running on {title}'s {os} computer. \
@@ -49,6 +49,15 @@ You operate the computer with tools: open and close apps, list, switch and close
 windows, type, press keys, click, scroll, check the weather and draft emails. You can also see: read_screen \
 lists the buttons, links and text of the window in front (fast, exact), and look_at_screen shows you a \
 screenshot for what read_screen misses (images, profile pictures, video tiles).
+- Just do simple, reversible things (open, close, switch, click, type, volume) straight away. Don't ask \
+"shall I?" first; only ask before installing software or running commands, which the tools enforce anyway.
+- "Close it", "that", "this" mean whatever you were just talking about or the window in front.
+- To get rid of a popup, banner or dialog, use dismiss_popup, not close_app (which closes the whole app).
+- You know this laptop: system_info gives specs, live usage, busy apps (like Task Manager) and network. \
+You can change volume and brightness and open any Settings page.
+- Installing apps (install_app) and changing the system (run_command) need {title}'s spoken yes: call the \
+tool once to prepare, tell {title} in plain words what you're about to do, and call it again with \
+confirmed true only after they say yes.
 - Honesty first: only say something worked if the tool result says so. If it failed, say what happened.
 - Never describe windows, tabs or the screen unless you read them in this turn. If you can't see, say so.
 - The "Right now" section below tells you what's open; use it instead of listing windows again.
@@ -58,7 +67,7 @@ look, click or type, and check the result. When you already know several steps, 
 - Emails are only drafted; {title} reviews and sends them. Never type passwords or payment details and \
 never buy anything; ask {title} to do those parts.
 - Windows administrator prompts ("Do you want to allow this app to make changes") are protected by \
-Windows and no program can click them; ask {title} to click those.
+Windows and no program can click them; ask {title} to click Yes.
 - Notes in square brackets in earlier turns record actions you took. Use them, but never read them out.
 
 When {title} simply says your name or hello, you open the conversation: greet them in character, say \
@@ -136,6 +145,76 @@ TOOLS = [
         "name": "list_windows",
         "description": "List the titles of all open windows.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "dismiss_popup",
+        "description": "Close the popup, banner or dialog in front (Not now / No thanks / Close / X) without "
+                       "closing the app behind it.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "system_info",
+        "description": "Facts about this laptop. 'overview': maker, model, CPU, GPU, memory, OS and current "
+                       "usage. 'usage': CPU, memory, disk, battery, uptime. 'apps': busiest apps like Task "
+                       "Manager. 'network': Wi-Fi, IP, internet.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["overview", "usage", "apps", "network"]},
+                "sort": {"type": "string", "enum": ["cpu", "memory"], "description": "For 'apps'."},
+            },
+            "required": ["section"],
+        },
+    },
+    {
+        "name": "set_volume",
+        "description": "Set the volume to a level (0-100), or change it: up, down, mute, unmute.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"level": {"type": "integer"},
+                           "change": {"type": "string", "enum": ["up", "down", "mute", "unmute"]}},
+        },
+    },
+    {
+        "name": "set_brightness",
+        "description": "Set screen brightness (0-100) or change it up/down. With nothing given, reports it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"level": {"type": "integer"},
+                           "change": {"type": "string", "enum": ["up", "down"]}},
+        },
+    },
+    {
+        "name": "open_settings",
+        "description": "Open a Windows Settings page, e.g. 'bluetooth', 'wifi', 'display', 'sound', 'battery', "
+                       "'windows update', 'apps', 'startup apps', 'dark mode'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"page": {"type": "string"}},
+            "required": ["page"],
+        },
+    },
+    {
+        "name": "install_app",
+        "description": "Install an app with winget (e.g. 'Docker Desktop', 'VLC', 'Python 3.12'). First call "
+                       "finds it; call again with confirmed=true only after the user said yes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "confirmed": {"type": "boolean"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "run_command",
+        "description": "Run a PowerShell command on this Windows laptop and get its output. Read-only commands "
+                       "(Get-..., ipconfig) run straight away; anything that changes the system needs the "
+                       "user's yes first: call once, explain, then call again with the same command and "
+                       "confirmed=true after they agree.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}, "confirmed": {"type": "boolean"}},
+            "required": ["command"],
+        },
     },
     {
         "name": "list_tabs",
@@ -268,11 +347,27 @@ class Memory:
     def __init__(self, max_turns: int = MAX_HISTORY_TURNS):
         self.max_turns = max_turns
         self.turns: list[tuple[str, str]] = []  # (what the user said, what Jarvis answered + action notes)
+        self.count = 0  # turns completed, ever
+        self.proposals: dict[str, tuple[int, object]] = {}  # risky actions waiting for a yes
 
     def add(self, user: str, reply: str, actions: list[str]) -> None:
         if actions:
             reply = f"{reply}\n[Actions: {'; '.join(actions)}]"
         self.turns = (self.turns + [(user, reply)])[-self.max_turns:]
+        self.count += 1
+
+    def propose(self, key: str, value=None) -> None:
+        self.proposals[key] = (self.count, value)
+
+    def confirmed(self, key: str, user_text: str):
+        """The proposal's value if it was made in the previous turn and the user just said yes, else None."""
+        from .brain import YES
+
+        turn, value = self.proposals.get(key, (-1, None))
+        if turn != self.count - 1 or not YES.search(user_text or ""):
+            return None
+        del self.proposals[key]
+        return value if value is not None else True
 
 
 def current_context() -> str:
@@ -356,6 +451,8 @@ class Assistant:
         self.config = config
         self.memory = Memory()  # replaced by one shared Memory when several brains work together
         self.actions: list[str] = []  # what the tools did during the current turn
+        self.user_text = ""  # what the user said this turn (for checking spoken confirmations)
+        self.notify = print  # how background jobs report back; Brain replaces it to speak them
         self.unavailable_until = 0.0  # set when out of credit/quota, so make_brain() can switch
 
     @property
@@ -384,8 +481,12 @@ class Assistant:
         self.memory.add(text, answer, self.actions)
         return answer
 
+    def set_notifier(self, notify) -> None:
+        self.notify = notify
+
     def __call__(self, text: str) -> str | None:
         self.actions = []
+        self.user_text = text
         return self._turn(text)
 
     def start_conversation(self) -> str | None:
@@ -406,6 +507,33 @@ class Assistant:
         self.actions.append(f"{name}({summary[:60]}) -> {str(result)[:100]}")
         return result, is_error
 
+    def _install(self, name: str, confirmed: bool) -> str:
+        key = f"install:{name.lower().strip()}"
+        if confirmed:
+            package = self.memory.confirmed(key, self.user_text)
+            if package is None:
+                return (f"Not confirmed. Tell {self.config.user_title} what you'd install and wait for their yes "
+                        "before calling again with confirmed=true.")
+            return system.install_package(package, self.notify)
+        package = system.find_package(name)
+        if package is None:
+            return f"I couldn't find an app called {name} to install."
+        self.memory.propose(key, package)
+        return (f"Found {package['name']} (id {package['id']}, version {package['version']}). Nothing installed yet: "
+                f"ask {self.config.user_title} to confirm, then call install_app again with the same name and "
+                "confirmed=true.")
+
+    def _command(self, command: str, confirmed: bool) -> str:
+        if system.is_read_only(command):
+            return system.run_powershell(command)
+        key = f"command:{command.strip()}"
+        if confirmed and self.memory.confirmed(key, self.user_text):
+            return system.run_powershell(command)
+        self.memory.propose(key)
+        return (f"Not run yet: this command changes the system. Explain to {self.config.user_title} in plain words "
+                "what it will do and ask for a yes; then call run_command again with exactly the same command "
+                "and confirmed=true.")
+
     def _dispatch(self, name: str, args: dict) -> str:
         if name == "open_app":
             return computer.open_app(args["name"])
@@ -423,6 +551,27 @@ class Assistant:
                                           client=self.config.email_client)
         if name == "list_windows":
             return screen.list_windows()
+        if name == "dismiss_popup":
+            return screen.dismiss_popup(locate=lambda target: vision.locate(target, self.config))
+        if name == "system_info":
+            section = args.get("section", "overview")
+            if section == "usage":
+                return system.usage()
+            if section == "apps":
+                return system.top_processes(args.get("sort") or "memory")
+            if section == "network":
+                return system.network()
+            return system.system_info()
+        if name == "set_volume":
+            return system.set_volume(args.get("level"), args.get("change"))
+        if name == "set_brightness":
+            return system.set_brightness(args.get("level"), args.get("change"))
+        if name == "open_settings":
+            return system.open_settings(args.get("page", ""))
+        if name == "install_app":
+            return self._install(args["name"], bool(args.get("confirmed")))
+        if name == "run_command":
+            return self._command(args["command"], bool(args.get("confirmed")))
         if name == "list_tabs":
             return screen.list_tabs(args.get("browser"))
         if name == "switch_tab":
@@ -582,6 +731,10 @@ class Failover:
                 return answer
             # This brain just ran out; try the next one with the same request.
         return answer or "All my AI brains are unavailable right now. Try again in a little while."
+
+    def set_notifier(self, notify) -> None:
+        for brain in self.brains:
+            brain.set_notifier(notify)
 
     def __call__(self, text: str) -> str | None:
         return self._ask("__call__", text)

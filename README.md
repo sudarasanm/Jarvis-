@@ -53,6 +53,11 @@ To update later: `git pull`, then run the installer again.
 | "open Netflix and tell me the profiles", "pick Amma" | see the screen and act on it step by step |
 | "which accounts are in Chrome" / "open Chrome as Work" | list browser profiles (Chrome, Brave, Edge) or open one |
 | "open Hotstar and play Jailer" / "open Claude, ask it X and read me the answer" | multi-step tasks in apps and websites |
+| "close the popup" / "dismiss that banner" | click the popup's own Not now / No thanks / Close button (not the app's) |
+| "close it" | close whatever you were just talking about |
+| "install Docker" / "install VLC" | find it in the Windows catalogue (winget), **ask you first**, install it, and tell you when it's done |
+| "what are my laptop specs" / "how much battery is left" / "why is my laptop slow" / "am I connected" | specs, live usage, busiest apps (like Task Manager), Wi-Fi and internet |
+| "set the volume to 40" / "mute" / "brightness 70" / "open bluetooth settings" | volume, brightness, any Settings page |
 | "type hello world" | type into whatever text box is focused |
 | "press enter" / "press control t" / "press alt tab" | press keys |
 | "write an email to sudar at gmail dot com about the demo" | draft it in Gmail for you to review and send (never sends by itself) |
@@ -77,7 +82,8 @@ Jarvis uses Gemini first, **switches to Ollama automatically** when Gemini's fre
 
 ## What it can't do
 
-- **Windows administrator prompts** ("Do you want to allow this app to make changes to your device?") appear on a protected screen that Windows blocks all programs from reading or clicking. You'll have to click those yourself. Normal "Allow / Cancel" popups work.
+- **Windows administrator prompts** ("Do you want to allow this app to make changes to your device?") appear on a protected screen that Windows blocks all programs from reading or clicking. When you install something, Jarvis tells you to click **Yes** on it. Normal "Allow / Cancel" popups work.
+- Installing apps and running commands that change the system always need your spoken "yes" first. This is enforced in code, not just by asking the AI nicely.
 - It won't type passwords or payment details, or buy things. It asks you to do those parts.
 - Seeing the screen works on the main monitor, and reading buttons by name works on Windows.
 
@@ -133,7 +139,7 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 .venv\Scripts\python -m jarvis --stop     # stop the background copy
 ```
 
-When it runs in the background, everything it hears and does is logged to `%USERPROFILE%\.jarvis.log`. Stop the background copy first (only one Jarvis runs at a time).
+The console shows timings for every step, like `(heard 2.1s of speech, recognised in 0.8s)` and `(answered in 3.4s)`, so you can see where any delay comes from. When it runs in the background, everything it hears and does is logged to `%USERPROFILE%\.jarvis.log`. Stop the background copy first (only one Jarvis runs at a time).
 
 On macOS/Linux: `pip install -r requirements.txt` (macOS: `brew install portaudio` first; Linux: `sudo apt install portaudio19-dev espeak`), then `python -m jarvis`.
 

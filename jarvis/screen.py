@@ -273,6 +273,63 @@ def click(target: str, double: bool = False, right: bool = False, locate=None) -
     return f"I couldn't find {target} on the screen."
 
 
+# Buttons that make a popup, banner or dialog go away without doing anything, best first.
+DISMISS_BUTTONS = ["not now", "no thanks", "no, thanks", "maybe later", "skip", "dismiss", "got it", "close",
+                   "close dialog", "close popup", "\u00d7", "\u2715", "x", "cancel", "later", "remind me later"]
+
+
+def _window_rect():
+    import uiautomation as auto
+
+    root = auto.GetForegroundControl()
+    return root.BoundingRectangle if root is not None else None
+
+
+def dismiss_popup(locate=None) -> str:
+    """Close the popup/dialog/banner in front, without closing the window behind it."""
+    import pyautogui
+
+    if SYSTEM == "Windows":
+        try:
+            elements = [e for e in screen_elements() if e.kind in ("Button", "Hyperlink", "SplitButton")]
+            rect = _window_rect()
+        except Exception as e:
+            print(f"(UI Automation failed: {e!r})")
+            elements, rect = [], None
+
+        def is_caption_button(e: Element) -> bool:
+            # The window's own minimise/maximise/close buttons sit in the top-right corner.
+            return rect is not None and e.y < rect.top + 50 and e.x > rect.right - 200
+
+        for wanted in DISMISS_BUTTONS:
+            for e in elements:
+                if _norm(e.name) == _norm(wanted) and not is_caption_button(e):
+                    click_point(e.x, e.y)
+                    return f"Dismissed it with '{e.name}'."
+    if locate is not None:
+        point = locate("the button that closes or dismisses the popup, dialog or banner (an X, Close, "
+                       "Not now or No thanks), not the window's own close button")
+        if point is not None:
+            click_point(*point)
+            return "Closed the popup."
+    pyautogui.press("esc")
+    return "I pressed Escape, which closes most popups. Is it gone?"
+
+
+def close_front_window() -> str:
+    try:
+        import pygetwindow
+
+        win = pygetwindow.getActiveWindow()
+    except Exception:
+        win = None
+    if win is None or not (win.title or "").strip():
+        return "There's no window in front to close."
+    title = clean_title(win.title)
+    win.close()
+    return f"Closed {title}."
+
+
 def scroll(direction: str = "down", amount: str = "normal") -> str:
     import pyautogui
 

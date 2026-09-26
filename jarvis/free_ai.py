@@ -76,6 +76,20 @@ def gemini_models(config: Config) -> list[str]:
     return list(dict.fromkeys(m for m in models if m))
 
 
+# Less thinking = faster spoken replies. Newer models take thinkingLevel, older ones thinkingBudget;
+# each model remembers the first option it accepted.
+THINKING_OPTIONS = [{"thinkingLevel": "low"}, {"thinkingBudget": 0}, None]
+_thinking_choice: dict[str, int] = {}
+
+
+def _with_thinking(body: dict, option: dict | None) -> dict:
+    if option is None:
+        return body
+    config = dict(body.get("generationConfig") or {})
+    config["thinkingConfig"] = option
+    return {**body, "generationConfig": config}
+
+
 def gemini_generate(config: Config, body: dict, key: str | None = None, post=None) -> dict:
     """Call Gemini, riding out the free tier's limits: wait out very short limits, rotate to the next
     model (each has its own free quota), and raise GeminiUnavailable when they're all resting."""
@@ -85,14 +99,21 @@ def gemini_generate(config: Config, body: dict, key: str | None = None, post=Non
     for model in gemini_models(config):
         if time.time() < _gemini_resting.get(model, 0):
             continue
-        for attempt in range(2):
+        waited = False
+        while True:
+            choice = _thinking_choice.get(model, 0)
             try:
-                return post(GEMINI_URL.format(model=model), body, {"x-goog-api-key": key})
+                return post(GEMINI_URL.format(model=model), _with_thinking(body, THINKING_OPTIONS[choice]),
+                            {"x-goog-api-key": key})
             except HTTPError as e:
                 last_error = e
+                if e.status == 400 and "thinking" in e.message.lower() and choice + 1 < len(THINKING_OPTIONS):
+                    _thinking_choice[model] = choice + 1  # this model wants a different thinking setting
+                    continue
                 if e.status == 429:
                     delay = retry_delay(e.message)
-                    if attempt == 0 and delay is not None and delay <= 5:
+                    if not waited and delay is not None and delay <= 5:
+                        waited = True
                         time.sleep(delay + 0.3)
                         continue
                     rest = max(delay or 60, 10)
