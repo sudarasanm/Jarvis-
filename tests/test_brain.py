@@ -2,6 +2,7 @@ import pytest
 
 from jarvis.brain import Brain
 from jarvis.config import Config
+from jarvis import computer
 from jarvis.skills import power, weather, web
 
 
@@ -9,6 +10,7 @@ from jarvis.skills import power, weather, web
 def brain(monkeypatch):
     opened = []
     monkeypatch.setattr(web, "open_url", opened.append)
+    monkeypatch.setattr(computer, "open_url", opened.append)
     b = Brain(Config(dry_run=True))
     b.opened = opened
     return b
@@ -96,8 +98,11 @@ def test_web_commands(brain):
     ]
 
 
-def test_goodbye_exits(brain):
-    assert brain.handle("goodbye").exit
+def test_goodbye_ends_conversation_and_quit_exits(brain):
+    r = brain.handle("goodbye")
+    assert r.sleep and not r.exit
+    assert brain.handle("go offline").exit
+    assert brain.handle("close yourself").exit
 
 
 def test_unknown_goes_to_fallback():
@@ -129,14 +134,54 @@ def test_broken_skill_does_not_crash():
     assert "something went wrong" in b.handle("what is the meaning of life").text
 
 
-def test_claude_disabled_without_credentials(monkeypatch):
-    pytest.importorskip("anthropic")
-    from jarvis.ai import make_fallback
+class FakeListener:
+    def __init__(self, lines):
+        self.lines = iter(lines)
 
-    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", "/nonexistent")
-    assert make_fallback(Config()) is None
+    def listen(self, timeout=None, phrase_limit=8, pause=0.7):
+        return next(self.lines)
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    assert make_fallback(Config()) is not None
+
+def run_voice(brain, lines):
+    from jarvis.__main__ import voice_loop
+    from jarvis.voice import Speaker
+
+    said = []
+    speaker = Speaker(mute=True)
+    speaker.say = said.append
+    with pytest.raises(StopIteration):
+        voice_loop(brain, speaker, FakeListener(lines))
+    return said
+
+
+def test_saying_the_name_starts_a_conversation_without_wake_words():
+    class FakeClaude:
+        def start_conversation(self):
+            return "Good evening. How was your day?"
+
+        def __call__(self, text):
+            return f"Interesting: {text}"
+
+    b = Brain(Config(), fallback=FakeClaude())
+    said = run_voice(b, [
+        "some tv noise",           # ignored: not in a conversation
+        "Jarvis",                  # Claude opens the conversation
+        "it was long",             # no wake word needed now
+        "I think pineapple belongs on pizza",
+        None,                      # silence ends the conversation
+        "what time is it",         # ignored again
+    ])
+    assert said == [
+        "Good evening. How was your day?",
+        "Interesting: it was long",
+        "Interesting: I think pineapple belongs on pizza",
+    ]
+
+
+def test_bye_ends_conversation():
+    b = Brain(Config())
+    said = run_voice(b, ["hey jarvis", "what time is it", "bye", "tell me a joke"])
+    assert said[0] == "Yes, sir?"
+    assert said[1].startswith("It's")
+    assert "say my name" in said[2]
+    assert len(said) == 3  # the joke request was ignored: conversation over

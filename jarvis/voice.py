@@ -34,23 +34,65 @@ class Speaker:
             self.engine.runAndWait()
 
 
-class Listener:
-    """Wraps SpeechRecognition + the default microphone. Raises on init if unavailable."""
+# How much quieter than the room's background noise speech may be and still count, as
+# (initial threshold multiplier, dynamic adjustment ratio). Lower = hears quieter voices.
+SENSITIVITY = {
+    "low": (1.5, 2.0),
+    "normal": (1.0, 1.5),
+    "high": (0.6, 1.25),
+    "max": (0.35, 1.1),
+}
 
-    def __init__(self):
+
+def boost_quiet_audio(raw: bytes, target_peak: int = 20000, max_gain: float = 8.0) -> bytes:
+    """Amplify quiet 16-bit audio so soft speech reaches the recogniser at a normal level."""
+    import sys
+    from array import array
+
+    samples = array("h")
+    samples.frombytes(raw)
+    if sys.byteorder == "big":  # audio from the microphone is little-endian
+        samples.byteswap()
+    peak = max((abs(x) for x in samples), default=0)
+    if peak == 0 or peak >= target_peak:
+        return raw
+    gain = min(target_peak / peak, max_gain)
+    boosted = array("h", (max(-32768, min(32767, int(x * gain))) for x in samples))
+    if sys.byteorder == "big":
+        boosted.byteswap()
+    return boosted.tobytes()
+
+
+def list_microphones() -> list[str]:
+    import speech_recognition as sr
+
+    return sr.Microphone.list_microphone_names()
+
+
+class Listener:
+    """Wraps SpeechRecognition + a microphone. Raises on init if unavailable."""
+
+    def __init__(self, language: str = "en-US", sensitivity: str = "high", device_index: int | None = None):
         import speech_recognition as sr
 
         self.sr = sr
+        self.language = language
         self.recognizer = sr.Recognizer()
-        self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 0.6  # seconds of silence that end a phrase
-        self.recognizer.non_speaking_duration = 0.4
-        self.microphone = sr.Microphone()
+        self.microphone = sr.Microphone(device_index=device_index)
         with self.microphone as source:
-            self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
+        factor, ratio = SENSITIVITY.get(sensitivity, SENSITIVITY["high"])
+        self.recognizer.energy_threshold = max(self.recognizer.energy_threshold * factor, 30)
+        self.recognizer.dynamic_energy_threshold = True
+        self.recognizer.dynamic_energy_adjustment_ratio = ratio
+        self.recognizer.non_speaking_duration = 0.4
 
-    def listen(self, timeout: float | None = None, phrase_limit: float = 6) -> str | None:
-        """Record one phrase and return its transcript, or None if nothing intelligible was heard."""
+    def listen(self, timeout: float | None = None, phrase_limit: float = 8, pause: float = 0.7) -> str | None:
+        """Record one phrase and return its transcript, or None if nothing intelligible was heard.
+
+        pause: seconds of silence that end a phrase (longer in conversation, so you can think mid-sentence).
+        """
+        self.recognizer.pause_threshold = pause
         with self.microphone as source:
             print("(listening...)")
             try:
@@ -58,8 +100,10 @@ class Listener:
             except self.sr.WaitTimeoutError:
                 return None
         print("(recognizing...)")
+        if audio.sample_width == 2:
+            audio = self.sr.AudioData(boost_quiet_audio(audio.get_raw_data()), audio.sample_rate, 2)
         try:
-            return self.recognizer.recognize_google(audio)
+            return self.recognizer.recognize_google(audio, language=self.language)
         except self.sr.UnknownValueError:
             return None
         except self.sr.RequestError:

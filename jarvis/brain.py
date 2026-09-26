@@ -21,10 +21,14 @@ class Response:
     on_confirm: Callable[[], "Response"] | None = None
     # If set, Jarvis asked a question and passes the next thing you say to this.
     on_reply: Callable[[str], "Response"] | None = None
+    # End the conversation: go back to waiting for "Hey Jarvis".
+    sleep: bool = False
+    # Quit the program entirely.
     exit: bool = False
 
 
-Handler = Callable[[re.Match, "Brain"], Response]
+# A handler may return None to pass, letting later skills or Claude handle the request.
+Handler = Callable[[re.Match, "Brain"], "Response | None"]
 
 _SKILLS: list[tuple[re.Pattern, Handler]] = []
 
@@ -79,6 +83,10 @@ class Brain:
         self._pending = self._pending_reply = None
         try:
             response = self._dispatch(text.strip().rstrip(".!?"), confirm, reply)
+        except ModuleNotFoundError as e:
+            print(f"(error: {e!r})")
+            response = Response(f"I'm missing the {e.name} package, {self.title}. "
+                                "Please run the installer again, or pip install -r requirements.txt.")
         except Exception as e:  # a broken skill should never take Jarvis down
             print(f"(error: {e!r})")
             response = Response(f"Apologies, {self.title}, something went wrong there.")
@@ -102,7 +110,9 @@ class Brain:
         for pattern, handler in _SKILLS:
             match = pattern.search(text)
             if match:
-                return handler(match, self)
+                response = handler(match, self)
+                if response is not None:
+                    return response
 
         if self.fallback is not None:
             answer = self.fallback(text)

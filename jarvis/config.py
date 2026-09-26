@@ -1,4 +1,9 @@
-"""Runtime settings, read from environment variables and ~/.jarvis.json."""
+"""Runtime settings.
+
+Each setting is read from an environment variable (JARVIS_<NAME>), then from
+~/.jarvis.json, then falls back to a default. ~/.jarvis.json lives outside the
+code folder, so it's the right place for your API key too.
+"""
 
 from __future__ import annotations
 
@@ -27,21 +32,44 @@ def save_setting(key: str, value) -> None:
         pass
 
 
-def _flag(name: str, default: bool = False) -> bool:
-    return os.environ.get(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+def setting(key: str, default=None):
+    env = os.environ.get(f"JARVIS_{key.upper()}")
+    if env not in (None, ""):
+        return env
+    return load_settings().get(key, default)
+
+
+def _flag(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _setting_field(key: str, default=None, cast=None):
+    def factory():
+        value = setting(key, default)
+        return cast(value) if cast is not None and value is not None else value
+
+    return field(default_factory=factory)
 
 
 @dataclass
 class Config:
-    name: str = field(default_factory=lambda: os.environ.get("JARVIS_NAME", "Jarvis"))
-    user_title: str = field(
-        default_factory=lambda: os.environ.get("JARVIS_USER_TITLE") or load_settings().get("user_title", "sir")
-    )
-    city: str | None = field(default_factory=lambda: os.environ.get("JARVIS_CITY") or None)
-    units: str = field(default_factory=lambda: os.environ.get("JARVIS_UNITS", "metric"))
+    name: str = _setting_field("name", "Jarvis")
+    user_title: str = _setting_field("user_title", "sir")
+    city: str | None = _setting_field("city")
+    units: str = _setting_field("units", "metric")
     # When true, power commands (shutdown, restart...) are printed instead of executed.
-    dry_run: bool = field(default_factory=lambda: _flag("JARVIS_DRY_RUN"))
-    claude_model: str = field(default_factory=lambda: os.environ.get("JARVIS_CLAUDE_MODEL", "claude-opus-5"))
+    dry_run: bool = _setting_field("dry_run", False, _flag)
+    claude_model: str = _setting_field("claude_model", "claude-opus-5")
+    # Speech recognition language, e.g. en-US, en-GB, en-IN (Indian English), ta-IN (Tamil).
+    language: str = _setting_field("language", "en-US")
+    # How easily quiet speech is picked up: low, normal, high, max.
+    mic_sensitivity: str = _setting_field("mic_sensitivity", "high")
+    # Which microphone to use (see `python -m jarvis --list-mics`); empty = system default.
+    mic_index: int | None = _setting_field("mic_index", None, int)
+    # Seconds of silence before a conversation ends and Jarvis waits for its name again.
+    conversation_timeout: float = _setting_field("conversation_timeout", 12, float)
+    # Where email drafts open: "gmail" or "default" (your mail app).
+    email_client: str = _setting_field("email_client", "gmail")
 
     @property
     def wake_word(self) -> str:

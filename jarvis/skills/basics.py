@@ -87,6 +87,13 @@ def help_(m, brain):
     )
 
 
-@skill(r"^(goodbye|bye|exit|quit|go to sleep jarvis|shut ?down jarvis|that'?s all)$", r"\b(goodbye|good night) jarvis\b")
+@skill(r"^(?:ok(?:ay)?\s+)?(goodbye|good ?bye|bye( bye)?|good night|see you( later)?|that'?s all|that will be all|"
+       r"nothing( else)?|never ?mind|go to sleep|sleep now|talk (to you )?later)$")
 def goodbye(m, brain):
-    return Response(f"Goodbye, {brain.title}. I'll be here if you need me.", exit=True)
+    return Response(f"Very well, {brain.title}. Just say my name if you need me.", sleep=True)
+
+
+@skill(r"^(exit|quit|go offline|power down|shut (yourself )?down|turn (yourself )?off|stop listening|"
+       r"(close|quit|exit) (yourself|jarvis))$")
+def quit_(m, brain):
+    return Response(f"Powering down. Goodbye, {brain.title}.", exit=True)
