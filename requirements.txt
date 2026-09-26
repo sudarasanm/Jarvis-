@@ -2,6 +2,7 @@
 SpeechRecognition>=3.10
 pyaudio>=0.2.13        # on Windows needs Python 3.13 or older (no prebuilt 3.14 package yet)
 pyttsx3>=2.90
+pywin32>=306; sys_platform == "win32"   # Windows speech engine (SAPI)
 
 # Computer control
 pyautogui>=0.9.54      # typing, key presses, Start-menu search

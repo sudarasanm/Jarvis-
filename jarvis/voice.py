@@ -6,32 +6,75 @@ and without SpeechRecognition/PyAudio the main loop uses typed input.
 
 from __future__ import annotations
 
+import platform
+
+
+BRITISH_VOICE_HINTS = ("george", "daniel", "hazel", "en-gb", "english (great britain)", "united kingdom")
+
 
 class Speaker:
+    """Text to speech.
+
+    On Windows this talks to the built-in Windows speech engine (SAPI) directly. pyttsx3 has a
+    long-standing Windows bug where only the first sentence is spoken and later ones are silent.
+    Elsewhere it uses pyttsx3.
+    """
+
     def __init__(self, name: str = "Jarvis", mute: bool = False):
         self.name = name
-        self.engine = None
+        self._speak = None
         if mute:
             return
+        if platform.system() == "Windows":
+            self._speak = self._init_sapi()
+        if self._speak is None:
+            self._speak = self._init_pyttsx3()
+
+    def _init_sapi(self):
+        try:
+            import win32com.client
+
+            voice = win32com.client.Dispatch("SAPI.SpVoice")
+            voices = voice.GetVoices()
+            for i in range(voices.Count):
+                if any(k in voices.Item(i).GetDescription().lower() for k in BRITISH_VOICE_HINTS):
+                    voice.Voice = voices.Item(i)
+                    break
+            voice.Rate = 1  # -10 (slow) .. 10 (fast)
+            return lambda text: voice.Speak(text)  # blocks until finished
+        except Exception as e:
+            print(f"(Windows speech unavailable, trying pyttsx3: {e!r})")
+            return None
+
+    def _init_pyttsx3(self):
         try:
             import pyttsx3
 
-            self.engine = pyttsx3.init()
-            self.engine.setProperty("rate", 180)
-            # Prefer a British male voice when one is installed, for that authentic butler feel.
-            for voice in self.engine.getProperty("voices"):
+            engine = pyttsx3.init()
+            engine.setProperty("rate", 180)
+            # Prefer a British voice when one is installed, for that authentic butler feel.
+            for voice in engine.getProperty("voices"):
                 label = f"{voice.name} {voice.id}".lower()
-                if any(k in label for k in ("daniel", "george", "en-gb", "english (great britain)")):
-                    self.engine.setProperty("voice", voice.id)
+                if any(k in label for k in BRITISH_VOICE_HINTS):
+                    engine.setProperty("voice", voice.id)
                     break
-        except Exception:
-            self.engine = None
+
+            def speak(text):
+                engine.say(text)
+                engine.runAndWait()
+
+            return speak
+        except Exception as e:
+            print(f"(Speech output unavailable: {e!r})")
+            return None
 
     def say(self, text: str) -> None:
         print(f"{self.name}: {text}")
-        if self.engine is not None:
-            self.engine.say(text)
-            self.engine.runAndWait()
+        if self._speak is not None:
+            try:
+                self._speak(text)
+            except Exception as e:
+                print(f"(speech error: {e!r})")
 
 
 # How much quieter than the room's background noise speech may be and still count, as
