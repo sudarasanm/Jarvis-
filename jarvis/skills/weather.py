@@ -1,5 +1,7 @@
 """Weather from Open-Meteo (free, no API key)."""
 
+from __future__ import annotations
+
 import json
 import urllib.parse
 import urllib.request
