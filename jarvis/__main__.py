@@ -10,18 +10,23 @@ from .config import Config
 from .voice import Listener, Speaker
 
 
-def voice_loop(brain: Brain, speaker: Speaker, listener: Listener) -> None:
-    print(f'Listening... say "Hey {brain.config.name}" followed by a command. Ctrl+C to quit.')
-    awake = False  # True right after the wake word, or while Jarvis is waiting for an answer
+def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake: bool = False) -> None:
+    if always_awake:
+        print("Listening... just speak a command (no wake word needed). Ctrl+C to quit.")
+    else:
+        print(f'Listening... say "Hey {brain.config.name}" followed by a command. Ctrl+C to quit.')
+    awake = always_awake  # True right after the wake word, or while Jarvis is waiting for an answer
     while True:
         heard = listener.listen(timeout=8 if awake else None)
         if heard is None:
-            awake = False
+            awake = always_awake
             continue
         print(f"You: {heard}")
         addressed, command = brain.strip_wake_word(heard)
         if not (addressed or awake):
-            continue  # not talking to us
+            print(f'(no "{brain.config.name}" heard, ignoring. Start with "Hey {brain.config.name}", '
+                  "or run with --no-wake)")
+            continue
         if addressed and not command:
             speaker.say(f"Yes, {brain.title}?")
             awake = True
@@ -30,7 +35,7 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener) -> None:
         speaker.say(response.text)
         if response.exit:
             return
-        awake = brain.awaiting_reply
+        awake = always_awake or brain.awaiting_reply
 
 
 def text_loop(brain: Brain, speaker: Speaker) -> None:
@@ -51,6 +56,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="jarvis", description="Your personal J.A.R.V.I.S.")
     parser.add_argument("--text", action="store_true", help="type commands instead of speaking")
     parser.add_argument("--mute", action="store_true", help="print replies instead of speaking them")
+    parser.add_argument("--no-wake", action="store_true", help='respond to everything, no "Hey Jarvis" needed')
     parser.add_argument("--dry-run", action="store_true", help="don't actually shut down / restart / sleep")
     args = parser.parse_args(argv)
 
@@ -73,7 +79,7 @@ def main(argv: list[str] | None = None) -> None:
     speaker.say(f"{config.name} online. At your service, {config.user_title}.")
     try:
         if listener is not None:
-            voice_loop(brain, speaker, listener)
+            voice_loop(brain, speaker, listener, always_awake=args.no_wake)
         else:
             text_loop(brain, speaker)
     except KeyboardInterrupt:

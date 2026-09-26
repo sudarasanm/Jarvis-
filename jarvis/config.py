@@ -46,3 +46,11 @@ class Config:
     @property
     def wake_word(self) -> str:
         return self.name.lower()
+
+    @property
+    def wake_words(self) -> list[str]:
+        """The name plus common speech-recognition mishearings of it."""
+        words = [self.wake_word]
+        if self.wake_word == "jarvis":
+            words += ["jervis", "javis", "jarves", "jarvi", "jarvys", "travis", "harvis", "garvis", "charvis", "davis"]
+        return words

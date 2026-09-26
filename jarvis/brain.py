@@ -63,10 +63,16 @@ class Brain:
 
     def strip_wake_word(self, text: str) -> tuple[bool, str]:
         """Return (was_addressed, command) for text like 'hey jarvis what time is it'."""
-        m = re.search(rf"\b{re.escape(self.config.wake_word)}\b[\s,.!?]*", text, re.I)
+        names = "|".join(re.escape(w) for w in self.config.wake_words)
+        m = re.search(rf"\b(?:{names})\b[\s,.!?]*", text, re.I)
         if not m:
             return False, text.strip()
-        return True, text[m.end():].strip()
+        after = text[m.end():].strip()
+        if after:
+            return True, after
+        # Name at the end ("goodbye Jarvis", "thank you Jarvis"): use what came before it.
+        before = re.sub(r"^\s*(hey|hi|hello|ok|okay|yo)\b[\s,]*", "", text[:m.start()], flags=re.I)
+        return True, before.strip(" ,.!?")
 
     def handle(self, text: str) -> Response:
         confirm, reply = self._pending, self._pending_reply

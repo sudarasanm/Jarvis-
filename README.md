@@ -18,6 +18,7 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -r requirements.txt
 python -m jarvis            # talk to it
 python -m jarvis --text     # type to it (no microphone needed)
+python -m jarvis --no-wake  # no "Hey Jarvis" needed, it answers everything it hears
 ```
 
 Say **"Hey Jarvis"** followed by a command, or just "Jarvis", wait for *"Yes, sir?"*, then speak.

@@ -43,18 +43,21 @@ class Listener:
         self.sr = sr
         self.recognizer = sr.Recognizer()
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 0.8
+        self.recognizer.pause_threshold = 0.6  # seconds of silence that end a phrase
+        self.recognizer.non_speaking_duration = 0.4
         self.microphone = sr.Microphone()
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
 
-    def listen(self, timeout: float | None = None, phrase_limit: float = 10) -> str | None:
+    def listen(self, timeout: float | None = None, phrase_limit: float = 6) -> str | None:
         """Record one phrase and return its transcript, or None if nothing intelligible was heard."""
         with self.microphone as source:
+            print("(listening...)")
             try:
                 audio = self.recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
             except self.sr.WaitTimeoutError:
                 return None
+        print("(recognizing...)")
         try:
             return self.recognizer.recognize_google(audio)
         except self.sr.UnknownValueError:

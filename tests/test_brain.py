@@ -18,6 +18,10 @@ def test_wake_word_is_stripped(brain):
     assert brain.strip_wake_word("Hey Jarvis, what time is it?") == (True, "what time is it?")
     assert brain.strip_wake_word("jarvis") == (True, "")
     assert brain.strip_wake_word("what time is it") == (False, "what time is it")
+    # Common mishearings still count
+    assert brain.strip_wake_word("hey Jervis what time is it") == (True, "what time is it")
+    assert brain.strip_wake_word("hey jarvis") == (True, "")
+    assert brain.strip_wake_word("goodbye Jarvis") == (True, "goodbye")
 
 
 def test_time_and_date(brain):
