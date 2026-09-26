@@ -60,7 +60,7 @@ def _change(text: str):
     return None
 
 
-@skill(NOT_DICTATION + r".*\bvolume\b", r"^(?:un)?mute(?:\s+(?:the\s+)?(?:sound|audio|volume|laptop|computer))?$",
+@skill(NOT_DICTATION + r".*\bvolume\b", r"^(?:un)?mute\s+(?:the\s+)?(?:sound|audio|volume|laptop|computer|speakers?)$",
        r"^(?:louder|quieter|softer)(?: please)?$")
 def volume(m, brain):
     text = m.string

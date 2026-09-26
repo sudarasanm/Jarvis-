@@ -153,15 +153,16 @@ function New-Shortcut($path, $arguments, $description) {
 }
 $startup = [Environment]::GetFolderPath("Startup")
 $desktop = [Environment]::GetFolderPath("Desktop")
-New-Shortcut (Join-Path $startup "Jarvis.lnk") "-m jarvis" "Start Jarvis in the background"
-New-Shortcut (Join-Path $desktop "Jarvis.lnk") "-m jarvis" "Start Jarvis in the background"
+# The service restarts Jarvis if it ever crashes. Runs as you, never as administrator.
+New-Shortcut (Join-Path $startup "Jarvis.lnk") "-m jarvis --service" "Start Jarvis in the background"
+New-Shortcut (Join-Path $desktop "Jarvis.lnk") "-m jarvis --service" "Start Jarvis in the background"
 New-Shortcut (Join-Path $desktop "Stop Jarvis.lnk") "-m jarvis --stop" "Stop Jarvis"
 Say "Jarvis will now start automatically when you log in."
 
 # --- 5. Start it now (restarting any copy that's already running) ---
 & $venvPython -m jarvis --stop | Out-Null
-Start-Process -FilePath $venvPythonw -ArgumentList "-m", "jarvis" -WorkingDirectory $root
+Start-Process -FilePath $venvPythonw -ArgumentList "-m", "jarvis", "--service" -WorkingDirectory $root
 Write-Host ""
-Say "Jarvis is running in the background. Say 'Jarvis' to start a conversation."
-Write-Host "    Stop it:   double-click 'Stop Jarvis' on the desktop, or say 'Jarvis, go offline'"
-Write-Host "    Log file:  $env:USERPROFILE\.jarvis.log"
+Say "Jarvis is running in the background. Say 'Hey Jarvis', or press Ctrl+Alt+J."
+Write-Host "    Stop it:   the tray circle's Exit, double-click 'Stop Jarvis' on the desktop, or say 'Jarvis, go offline'"
+Write-Host "    Log file:  $root\logs\jarvis.log   (watch live: .venv\Scripts\python -m jarvis --logs)"

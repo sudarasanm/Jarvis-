@@ -138,6 +138,15 @@ class Config:
     mic_index: int | None = _setting_field("mic_index", None, int)
     # Answer everything you say, no "Jarvis" needed (same as --no-wake).
     always_listen: bool = _setting_field("always_listen", False, _flag)
+    # How Jarvis hears its name: "openwakeword" (offline "Hey Jarvis", light, private) or "speech" (every phrase
+    # is recognised and checked for "Jarvis"; uses more data and CPU).
+    wake_engine: str = _setting_field("wake_engine", "openwakeword")
+    # How sure the offline wake word must be (0-1): lower hears you more easily but wakes by mistake more often.
+    wake_threshold: float = _setting_field("wake_threshold", 0.5, float)
+    # Push-to-talk keys; empty to turn off.
+    hotkey: str = _setting_field("hotkey", "ctrl+alt+j")
+    # Show the status circle in the taskbar tray.
+    tray: bool = _setting_field("tray", True, _flag)
     # Seconds of silence before a conversation ends and Jarvis waits for its name again.
     conversation_timeout: float = _setting_field("conversation_timeout", 12, float)
     # Carry out instructions ("open Chrome") silently; only speak for answers, questions and problems.

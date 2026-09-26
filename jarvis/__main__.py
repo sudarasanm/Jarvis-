@@ -1,9 +1,10 @@
 """Run Jarvis.
 
-    python -m jarvis              voice mode (say "Jarvis")
+    python -m jarvis              voice mode (say "Hey Jarvis", or press Ctrl+Alt+J)
     python -m jarvis --text       type instead of speaking
-    pythonw -m jarvis             run silently in the background (Windows; output goes to ~/.jarvis.log)
+    pythonw -m jarvis --service   run silently in the background, restarted if it crashes (what autostart uses)
     python -m jarvis --stop       stop a Jarvis running in the background
+    python -m jarvis --logs       watch what it's doing (logs/jarvis.log)
 """
 
 from __future__ import annotations
@@ -21,49 +22,90 @@ from .ai import make_brain
 from .brain import Brain, redact
 from .config import Config
 from .screen import make_dpi_aware
-from .voice import Listener, Speaker, list_microphones
+from .state import LOG_DIR, state
+from .voice import WAKE, Listener, Speaker, list_microphones
 
 # Jarvis listens on this local port so only one copy runs, and so `--stop` can reach it.
 CONTROL_PORT = 47631
-LOG_FILE = Path.home() / ".jarvis.log"
+LOG_FILE = LOG_DIR / "jarvis.log"
 
 
 def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake: bool = False) -> None:
     name = brain.config.name
+    wake = getattr(listener, "wake", None)  # the offline "Hey Jarvis" detector, if running
     if always_awake:
         print("Listening... just speak (no wake word needed). Ctrl+C to quit.")
+    elif wake is not None:
+        print(f'Listening for "Hey {name}" (offline). Ctrl+C to quit.')
     else:
         print(f'Listening... say "{name}" to start a conversation, or "Hey {name}, <command>". Ctrl+C to quit.')
 
     def say(text: str) -> None:
+        before = state.status
+        state.set("speaking")
         listener.mute()  # what's heard now is checked only for "stop" (and our own echo is ignored)
         try:
             if not speaker.say(text, interrupted=lambda: stop_requested(listener, text)):
                 print("(stopped talking)")
         finally:
             listener.unmute()
+            state.set(before if before != "speaking" else resting())
 
     # In a conversation Jarvis answers without hearing its name, until you're quiet for a while or say "bye".
-    in_conversation = always_awake
+    in_conversation = False
     last_activity = time.time()
-    while True:
+
+    def resting() -> str:
+        return "listening" if in_conversation else "idle"
+
+    def converse(on: bool) -> None:
+        nonlocal in_conversation, last_activity
+        in_conversation = on
+        last_activity = time.time()
+        if wake is not None:
+            listener.wake_only = not on  # outside a conversation only "Hey Jarvis" is listened for
+        state.set(resting())
+
+    def woke(how: str) -> None:
+        print(f"({how}: listening)")
+        if state.muted:
+            state.set_muted(False)
+        beep()
+        converse(True)
+
+    converse(always_awake and not state.muted)
+    while not state.exit_requested.is_set():
+        always = always_awake and not state.muted
+        if state.muted and in_conversation:
+            converse(False)  # muted from the tray
+        elif always and not in_conversation:
+            converse(True)  # unmuted with always_listen on
         for notice in brain.pop_notices():  # e.g. "Docker finished installing"
             say(notice)
+        if state.listen_now.is_set():  # push-to-talk or the tray's "Listen now"
+            state.listen_now.clear()
+            woke("push-to-talk")
+            continue
         heard = listener.listen(timeout=0.5)
         if heard is None:
-            if in_conversation and not always_awake and time.time() - last_activity > brain.config.conversation_timeout:
-                print(f'(conversation ended; say "{name}" when you need me)')
-                in_conversation = False
+            if in_conversation and not always and time.time() - last_activity > brain.config.conversation_timeout:
+                print(f'(conversation ended; say "Hey {name}" when you need me)')
+                converse(False)
+            continue
+        if heard == WAKE:
+            woke(f'"Hey {name}" heard')
             continue
         print(f"You: {redact(heard)}")
         addressed, command = brain.strip_wake_word(heard)
         if not (addressed or in_conversation):
             print(f'(no "{name}" heard, ignoring)')
             continue
+        if addressed and state.muted:
+            state.set_muted(False)
         begun = time.time()
         if addressed and not command:
+            converse(True)
             say(greeting(brain))
-            in_conversation = True
             last_activity = time.time()
             continue
         # Anything slower than a few seconds (a slow AI, a big screen to read) gets a "One moment" so it
@@ -71,19 +113,32 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
         holding = threading.Timer(4.0, lambda: say("One moment."))
         holding.daemon = True
         holding.start()
+        state.set("thinking")
         try:
             response = brain.handle(command)
         finally:
             holding.cancel()
+            state.set(resting())
         print(f"(answered in {time.time() - begun:.1f}s)")
         if response.quiet and brain.config.quiet_actions:
             print(f"(done: {response.text})")
         else:
             say(response.text)
-        last_activity = time.time()
         if response.exit:
             return
-        in_conversation = always_awake or not response.sleep
+        converse((always_awake and not state.muted) or not response.sleep)
+
+
+def beep() -> None:
+    """A short tone when Jarvis starts listening, so you know it heard "Hey Jarvis"."""
+    if sys.platform != "win32":
+        return
+    try:
+        import winsound
+
+        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+    except Exception:
+        pass
 
 
 STOP_WORDS = re.compile(r"^(?:(?:ok(?:ay)?|hey|jarvis)[\s,]+)*(?:stop|be quiet|quiet|shut up|enough|cancel|"
@@ -93,6 +148,8 @@ STOP_WORDS = re.compile(r"^(?:(?:ok(?:ay)?|hey|jarvis)[\s,]+)*(?:stop|be quiet|q
 
 def stop_requested(listener, speaking: str) -> bool:
     """Did the user say "stop" (or similar) while Jarvis was talking? Jarvis's own voice doesn't count."""
+    if state.listen_now.is_set():  # push-to-talk while Jarvis talks: stop and listen
+        return True
     heard = listener.heard_while_speaking()
     if not heard:
         return False
@@ -190,28 +247,31 @@ class Tee:
                 pass
 
 
-def rotate_log(max_bytes: int = 1_000_000, keep: int = 3) -> None:
-    """When the log passes ~1 MB, keep it as .jarvis.log.1 (older ones shift to .2, .3) and start afresh."""
-    if not LOG_FILE.exists() or LOG_FILE.stat().st_size <= max_bytes:
+def rotate_log(log_file: Path | None = None, max_bytes: int = 1_000_000, keep: int = 3) -> None:
+    """When a log passes ~1 MB, keep it as jarvis.log.1 (older ones shift to .2, .3) and start afresh."""
+    log_file = log_file or LOG_FILE
+    if not log_file.exists() or log_file.stat().st_size <= max_bytes:
         return
     for n in range(keep, 0, -1):
-        older = LOG_FILE.with_name(f"{LOG_FILE.name}.{n}")
-        newer = LOG_FILE.with_name(f"{LOG_FILE.name}.{n - 1}") if n > 1 else LOG_FILE
+        older = log_file.with_name(f"{log_file.name}.{n}")
+        newer = log_file.with_name(f"{log_file.name}.{n - 1}") if n > 1 else log_file
         if newer.exists():
             if older.exists():
                 older.unlink()
             newer.rename(older)
 
 
-def log_to_file() -> None:
-    """Everything Jarvis prints also goes to ~/.jarvis.log (kept under ~1 MB), so `--logs` can show it live
+def log_to_file(log_file: Path | None = None, title: str = "Jarvis started") -> None:
+    """Everything Jarvis prints also goes to logs/jarvis.log (kept under ~1 MB), so `--logs` can show it live
     in another window. With pythonw there's no console, so it only goes to the file."""
+    log_file = log_file or LOG_FILE
     try:
-        rotate_log()
-        log = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        rotate_log(log_file)
+        log = open(log_file, "a", encoding="utf-8", buffering=1)
     except OSError:
         return
-    log.write(f"\n===== Jarvis started {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+    log.write(f"\n===== {title} {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
     sys.stdout = Tee(sys.stdout, log)
     sys.stderr = Tee(sys.stderr, log)
 
@@ -257,7 +317,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--mute", action="store_true", help="print replies instead of speaking them")
     parser.add_argument("--no-wake", action="store_true", help='respond to everything, no "Jarvis" needed')
     parser.add_argument("--dry-run", action="store_true", help="don't actually shut down / restart / sleep")
-    parser.add_argument("--background", action="store_true", help="log to ~/.jarvis.log instead of the console")
+    parser.add_argument("--background", action="store_true", help="log to logs/jarvis.log instead of the console")
+    parser.add_argument("--service", action="store_true",
+                        help="run in the background and restart Jarvis if it crashes (used by autostart)")
     parser.add_argument("--stop", action="store_true", help="stop a Jarvis running in the background")
     parser.add_argument("--dump-window", action="store_true",
                         help="after 5 seconds, list everything Jarvis can see in the window in front")
@@ -271,7 +333,16 @@ def main(argv: list[str] | None = None) -> None:
     load_env_files()
 
     if args.stop:
-        print("Jarvis stopped." if stop_running_instance() else "Jarvis isn't running.")
+        from .service import stop_service
+
+        service = stop_service()  # first, so the watchdog doesn't start it again
+        stopped = stop_running_instance()
+        print("Jarvis stopped." if stopped or service else "Jarvis isn't running.")
+        return
+    if args.service:
+        from .service import run_service
+
+        run_service()
         return
     if args.dump_window:
         dump_window()
@@ -318,30 +389,57 @@ def main(argv: list[str] | None = None) -> None:
 
     listener = None
     if not args.text:
+        from .wakeword import make_wake_word
+
+        wake = make_wake_word(config.wake_engine, config.wake_threshold)
         # Right after login the microphone may not be ready yet, so keep trying for a minute in the background.
         for attempt in range(12 if background else 1):
             try:
                 listener = Listener(config.language, config.mic_sensitivity, config.mic_index,
-                                    engine=config.stt_engine, whisper_model=config.whisper_model)
+                                    engine=config.stt_engine, whisper_model=config.whisper_model, wake=wake)
                 break
             except Exception as e:
                 print(f"(Microphone unavailable: {e!r})")
+                if wake is not None:
+                    print("(trying the microphone without the offline wake word)")
+                    wake = None
+                    try:
+                        listener = Listener(config.language, config.mic_sensitivity, config.mic_index,
+                                            engine=config.stt_engine, whisper_model=config.whisper_model)
+                        break
+                    except Exception as e2:
+                        print(f"(Microphone unavailable: {e2!r})")
                 if background:
                     time.sleep(5)
         if listener is None:
             if background:
-                return  # no console to fall back to
+                sys.exit(3)  # no console to fall back to; the watchdog tries again shortly
             print("(Falling back to text mode.)")
+
+    tray = None
+    if config.tray and listener is not None:
+        from .tray import start_tray
+
+        tray = start_tray(config.name)
+    if listener is not None:
+        from .hotkey import start_hotkey
+
+        start_hotkey(config.hotkey)
 
     speaker.say(f"{config.name} online. At your service, {config.user_title}.")
     try:
         if listener is not None:
             voice_loop(brain, speaker, listener, always_awake=args.no_wake or config.always_listen)
+            if state.exit_requested.is_set():
+                speaker.say(f"Powering down. Goodbye, {config.user_title}.")
         else:
             text_loop(brain, speaker)
     except KeyboardInterrupt:
         print()
         speaker.say(f"Powering down. Goodbye, {config.user_title}.")
+    finally:
+        if tray is not None:
+            tray.stop()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Personal details, passwords and forms. Loaded first: none of this is sent to the AI.
 
 - "remember my email is ..." / "type my email" / "what's my phone number" / "forget my address"
-- "password is ..."   typed straight into the app; never saved, never sent to the AI, masked in the log
+- passwords / PINs    refused: Jarvis never types, stores or reads them; you type them yourself
 - card numbers        never stored or sent anywhere
 - "type X in the email field", "sign in", "submit", "allow"
 """
@@ -43,26 +43,26 @@ def clean_value(field: str, value: str) -> str:
 
 # --- passwords and cards (first, so nothing else ever sees them) --------------------------------
 
-# Only these exact forms: "password is X", "type (my|the) password X", "my pin is X".
-PASSWORD = re.compile(r"^(?:please\s+)?(?:(?:type|enter|put in)\s+(?:the\s+|my\s+)?(?:pass\s?word|passcode)\s+"
-                      r"(?:is\s+|as\s+|:\s*)?|(?:the\s+|my\s+)?(?:pass\s?word|passcode)\s*(?:is|:)\s+|"
+# Anything that looks like a password or PIN being handed over. Jarvis never types, stores or reads them
+# (they never reach the AI either): you type them yourself.
+PASSWORD = re.compile(r"^(?:please\s+)?(?:(?:type|enter|put in)\s+(?:the\s+|my\s+)?(?:pass\s?word|passcode|pin|otp)\s+"
+                      r"(?:is\s+|as\s+|:\s*)?|(?:the\s+|my\s+)?(?:pass\s?word|passcode|otp)\s*(?:is|:)\s+|"
                       r"(?:the\s+|my\s+)?pin\s+(?:is|number is)\s+)(?P<pw>.+)$", re.I)
+NO_PASSWORDS = ("I don't handle passwords, PINs or codes, {title}. Please type it yourself; "
+                "I'll carry on when you say so.")
 
 
 @skill(PASSWORD.pattern)
 def password(m, brain):
     value = m["pw"].strip()
     if re.match(r"^(?:for|of|field|box|in|into|here|there)\b", value, re.I):
-        return None  # "type the password in the field" etc.: not a password
-    if re.search(r"\b(remember|save|store)\b", m.string, re.I):
-        return Response("I won't store passwords. Say \"password is\" and the password when you need it typed.")
-    computer.type_text(dictation.secret(value))
-    return Response("Typed the password.", quiet=True)
+        return None  # "the password for wifi is on the router" etc.: not a password
+    return Response(NO_PASSWORDS.format(title=brain.title))
 
 
-@skill(r"\b(?:remember|save|store)\b.*\b(?:pass\s?words?|passcode|pin)\b")
+@skill(r"\b(?:remember|save|store|type|enter)\b.*\b(?:pass\s?words?|passcode|pin|otp)\b(?!\s+(?:this|the|that)\s+tab)")
 def no_saved_passwords(m, brain):
-    return Response("I won't store passwords. Say \"password is\" and the password whenever you need it typed.")
+    return Response(NO_PASSWORDS.format(title=brain.title))
 
 
 CARD = re.compile(r"\b(?:(?:credit|debit|atm|visa|master\s?card|rupay)\s*cards?|card\s*(?:number|no|details)|"

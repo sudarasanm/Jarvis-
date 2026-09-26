@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from . import actions
 from .config import Config
 
 
@@ -173,6 +174,7 @@ class Brain:
             print(f"(error: {e!r})")
             response = Response(f"Apologies, {self.title}, something went wrong there.")
         self._pending, self._pending_reply = response.on_confirm, response.on_reply
+        actions.record("command", heard=redact(text.strip())[:200], reply=redact(str(response.text))[:200])
         return response
 
     def _dispatch(self, text: str, confirm, reply) -> Response:

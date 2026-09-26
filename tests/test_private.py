@@ -63,15 +63,16 @@ def test_my_name_is_also_sets_what_jarvis_calls_you(keyboard):
     assert profile()["name"] == "Sudarsan M" and b.config.user_title == "Sudarsan"
 
 
-def test_password_is_typed_privately(keyboard):
+def test_passwords_are_refused_never_typed(keyboard):
     asked = []
     b = Brain(Config(), fallback=lambda text: asked.append(text) or "ok")
-    r = b.handle("password is hunter two two")
-    assert keyboard == ["hunter22"] and r.quiet
+    for said in ("password is hunter two two", "type my password hunter22", "my pin is 1234",
+                 "remember my password is abc", "enter the otp 445566"):
+        assert "don't handle passwords" in b.handle(said).text, said
+    assert keyboard == []                                # never typed
     assert asked == []                                   # never sent to the AI
-    assert "password" not in str(load_settings()).lower()  # never saved
-    assert "won't store passwords" in b.handle("remember my password is abc").text
-    assert b.handle("pin this tab").text != "Typed the password."
+    assert "hunter" not in str(load_settings()).lower()  # never saved
+    assert "don't handle passwords" not in b.handle("pin this tab").text
     assert redact("password is hunter two two") == "password is ****"
 
 

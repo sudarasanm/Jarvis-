@@ -20,3 +20,19 @@ def fresh_gemini_limits(monkeypatch):
 
     monkeypatch.setattr(ai, "current_context", lambda: "")
     monkeypatch.setattr(screen, "_working", {"name": None})
+
+
+@pytest.fixture(autouse=True)
+def fresh_state(tmp_path, monkeypatch):
+    """A clean shared state and a throwaway action log for every test."""
+    from jarvis import actions
+    from jarvis.state import State
+    import jarvis.state
+
+    fresh = State()
+    monkeypatch.setattr(jarvis.state, "state", fresh)
+    for module in ("jarvis.ai", "jarvis.__main__", "jarvis.skills.listening", "jarvis.hotkey", "jarvis.tray"):
+        mod = __import__(module, fromlist=["state"])
+        monkeypatch.setattr(mod, "state", fresh)
+    monkeypatch.setattr(actions, "ACTIONS_FILE", tmp_path / "actions.jsonl")
+    return fresh

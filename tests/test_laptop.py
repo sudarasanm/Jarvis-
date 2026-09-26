@@ -132,7 +132,7 @@ def test_volume_commands(keys):
     assert b.handle("set the volume to 40").text == "Volume set to 40."
     assert keys[-2:] == [("volumedown", 50), ("volumeup", 20)]
     assert b.handle("turn the volume up").text == "Volume up a bit."
-    assert b.handle("mute").text.startswith("Muted")
+    assert b.handle("mute the sound").text.startswith("Muted")
     assert b.handle("type the volume is too high").text == "Done."  # dictation isn't a volume command
 
 

@@ -127,7 +127,3 @@ def prepare(text: str) -> str:
         return spoken_email(join_spelled_letters(text))
     return join_spelled_letters(words_to_digits(text))
 
-
-def secret(text: str) -> str:
-    """A spoken password: digits for number words, spelled letters joined, spaces dropped, case kept."""
-    return join_spelled_letters(words_to_digits(text.strip().rstrip("."))).replace(" ", "")

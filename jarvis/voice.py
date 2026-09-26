@@ -281,6 +281,10 @@ class WhisperEar:
         return text or None
 
 
+# Put in the queue (and returned by Listener.listen) when the offline wake word is heard.
+WAKE = "<wake>"
+
+
 class Listener:
     """Always-on microphone.
 
@@ -290,7 +294,7 @@ class Listener:
     """
 
     def __init__(self, language: str = "en-US", sensitivity: str = "high", device_index: int | None = None,
-                 start: bool = True, engine: str = "auto", whisper_model: str = "base.en"):
+                 start: bool = True, engine: str = "auto", whisper_model: str = "base.en", wake=None):
         import speech_recognition as sr
 
         self.sr = sr
@@ -301,7 +305,15 @@ class Listener:
             self.whisper.preload()
         self.recognizer = sr.Recognizer()
         self.recognizer.operation_timeout = 8  # never hang waiting for Google's speech service
-        self.microphone = sr.Microphone(device_index=device_index)
+        # With the offline wake word, the microphone runs at 16 kHz in 80 ms chunks, which is what it needs.
+        self.wake = wake
+        self.wake_only = wake is not None  # True: only "Hey Jarvis" is listened for (the voice loop sets this)
+        if wake is not None:
+            from .wakeword import CHUNK, SAMPLE_RATE
+
+            self.microphone = sr.Microphone(device_index=device_index, sample_rate=SAMPLE_RATE, chunk_size=CHUNK)
+        else:
+            self.microphone = sr.Microphone(device_index=device_index)
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
         factor, ratio = SENSITIVITY.get(sensitivity, SENSITIVITY["high"])
@@ -321,15 +333,36 @@ class Listener:
     # --- recording (background thread) ---
 
     def _capture(self) -> None:
-        with self.microphone as source:
-            while True:
-                try:
-                    audio = self.recognizer.listen(source, phrase_time_limit=self.phrase_limit)
-                except Exception as e:
-                    print(f"(microphone error: {e!r})")
-                    time.sleep(1)
-                    continue
-                self._offer(audio, time.time())
+        from .state import state
+
+        while True:
+            if state.mic_off:  # privacy switch: the microphone is closed, not just ignored
+                time.sleep(0.3)
+                continue
+            try:
+                with self.microphone as source:
+                    print("(microphone on)")
+                    self._record(source, state)
+            except Exception as e:
+                print(f"(microphone error: {e!r})")
+                time.sleep(2)
+                continue
+            print("(microphone off)")
+
+    def _record(self, source, state) -> None:
+        """Record until the microphone is switched off (then the stream closes)."""
+        while not state.mic_off:
+            if self.wake is not None and self.wake_only and not self.speaking:
+                chunk = source.stream.read(source.CHUNK)
+                if self.wake.heard(chunk):
+                    self.wake_only = False  # what follows "Hey Jarvis" is the command
+                    self.phrases.put(WAKE)
+                continue
+            try:
+                audio = self.recognizer.listen(source, timeout=1, phrase_time_limit=self.phrase_limit)
+            except self.sr.WaitTimeoutError:
+                continue  # nobody spoke: check the switches again
+            self._offer(audio, time.time())
 
     def _offer(self, audio, ended: float) -> None:
         duration = len(audio.frame_data) / float(audio.sample_rate * audio.sample_width)
@@ -369,9 +402,12 @@ class Listener:
     def listen(self, timeout: float | None = None) -> str | None:
         """The next thing said, as text. None if nothing arrives within `timeout` or it wasn't words."""
         try:
-            _started, duration, audio = self.phrases.get(timeout=timeout)
+            item = self.phrases.get(timeout=timeout)
         except queue.Empty:
             return None
+        if item is WAKE:
+            return WAKE
+        _started, duration, audio = item
         return self.recognize(audio, duration)
 
     def recognize(self, audio, duration: float = 0.0) -> str | None:

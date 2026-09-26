@@ -6,12 +6,17 @@ edge-tts>=7.0          # natural neural voice (online; falls back to the Windows
 faster-whisper>=1.0    # offline speech recognition (downloads a ~150 MB model the first time it's used)
 pywin32>=306; sys_platform == "win32"   # Windows speech engine (SAPI)
 
+# Background service
+openwakeword>=0.6      # offline "Hey Jarvis" wake word (downloads a ~1 MB model the first time)
+pystray>=0.19          # the status circle in the taskbar tray
+keyboard>=0.13         # Ctrl+Alt+J push-to-talk
+
 # Computer control
 pyautogui>=0.9.54      # typing, key presses, Start-menu search
 pyperclip>=1.8         # typing non-English text
 psutil>=5.9            # closing apps, system status
-keyring>=24
-python-dotenv>=1.0     # optional .env file for settings and keys            # keeps the email app password in Windows Credential Manager
+keyring>=24            # keeps the email app password in Windows Credential Manager
+python-dotenv>=1.0     # optional .env file for settings and keys
 pillow>=10             # screenshots for looking at the screen
 uiautomation>=2.0.18; sys_platform == "win32"   # reading buttons/links in windows, clicking by name
 
