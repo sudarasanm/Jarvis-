@@ -8,6 +8,7 @@ pywin32>=306; sys_platform == "win32"   # Windows speech engine (SAPI)
 pyautogui>=0.9.54      # typing, key presses, Start-menu search
 pyperclip>=1.8         # typing non-English text
 psutil>=5.9            # closing apps, system status
+keyring>=24            # keeps the email app password in Windows Credential Manager
 pillow>=10             # screenshots for looking at the screen
 uiautomation>=2.0.18; sys_platform == "win32"   # reading buttons/links in windows, clicking by name
 

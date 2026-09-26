@@ -21,7 +21,7 @@ import re
 import time
 from datetime import datetime
 
-from . import computer, screen, system, vision
+from . import computer, messaging, screen, system, vision
 from .config import Config, load_settings
 
 SYSTEM_PROMPT = """You are {name}, the AI from Iron Man, now running on {title}'s {os} computer. \
@@ -60,6 +60,10 @@ until they move to something else.
 - Signing in and filling forms: click the field, then type. For their email, phone, name, address or \
 username use type_my_detail. Never type a password yourself: tell {title} to say "password is" followed by \
 it, and Jarvis types it privately without sending it to you.
+- Email: use email_list / email_read to check, search and summarise their Gmail (never by clicking around \
+the Gmail website). Summaries are spoken: who, what, and what needs doing, in a few sentences. To send, \
+use email_send: draft, read it back, send only after their yes.
+- WhatsApp: whatsapp_message types the message in the contact's chat; send only after their yes.
 - Shopping (Amazon and the like): search, open the product, pick options, add to cart and go to checkout. \
 Then stop, read back the item, price and delivery address, and ask {title} to click the final "Place \
 order" / "Pay" button themselves. Never enter card details and never place the order yourself.
@@ -227,6 +231,50 @@ TOOLS = [
             "properties": {"command": {"type": "string"}, "confirmed": {"type": "boolean"}},
             "required": ["command"],
         },
+    },
+    {
+        "name": "email_list",
+        "description": "List emails in the user's Gmail (newest first, stays unread): filter 'unread', "
+                       "'important', 'today', 'all', or any Gmail search like 'subject:application newer_than:7d' "
+                       "or 'from:amazon'. Each line starts with an id in brackets for email_read.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"filter": {"type": "string"}, "limit": {"type": "integer"}},
+        },
+    },
+    {
+        "name": "email_read",
+        "description": "Read one email in full by its id from email_list.",
+        "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+    },
+    {
+        "name": "email_send",
+        "description": "Send an email from the user's Gmail. First call prepares the draft (not sent); read the "
+                       "recipient, subject and gist back to the user, and only after they say yes call again with "
+                       "confirmed=true to send exactly that draft.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"},
+                           "confirmed": {"type": "boolean"}},
+            "required": ["to", "subject", "body"],
+        },
+    },
+    {
+        "name": "whatsapp_message",
+        "description": "Send a WhatsApp message to a contact (name as it appears in WhatsApp). First call opens the "
+                       "chat and types the message without sending; tell the user and, after their yes, call again "
+                       "with confirmed=true to send it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"contact": {"type": "string"}, "message": {"type": "string"},
+                           "confirmed": {"type": "boolean"}},
+            "required": ["contact", "message"],
+        },
+    },
+    {
+        "name": "whatsapp_open_chat",
+        "description": "Open WhatsApp at the chat with a contact, without typing anything.",
+        "input_schema": {"type": "object", "properties": {"contact": {"type": "string"}}, "required": ["contact"]},
     },
     {
         "name": "type_my_detail",
@@ -618,6 +666,33 @@ class Assistant:
                                           client=self.config.email_client)
         if name == "list_windows":
             return screen.list_windows()
+        if name == "email_list":
+            return messaging.list_emails(args.get("filter") or "unread", int(args.get("limit") or 10))
+        if name == "email_read":
+            return messaging.read_email(args["id"])
+        if name == "email_send":
+            if args.get("confirmed"):
+                draft = self.memory.confirmed("email_send", self.user_text)
+                if draft is None:
+                    return f"Not sent: {self.config.user_title} hasn't said yes to a draft yet."
+                return messaging.send_email(*draft)
+            if not messaging.email_ready():
+                return "Email isn't set up yet. Tell them to run: .venv\\Scripts\\python -m jarvis --setup-email"
+            self.memory.propose("email_send", (args["to"], args["subject"], args["body"]))
+            return ("Draft ready, NOT sent. Read the recipient, subject and a summary of the text to "
+                    f"{self.config.user_title} and ask whether to send it.")
+        if name == "whatsapp_message":
+            if args.get("confirmed"):
+                if self.memory.confirmed("whatsapp_send", self.user_text) is None:
+                    return f"Not sent: {self.config.user_title} hasn't said yes yet."
+                return messaging.send_typed_whatsapp_message()
+            result = messaging.type_whatsapp_message(args["contact"], args["message"])
+            if "not sent yet" in result:
+                self.memory.propose("whatsapp_send")
+                result += f" Ask {self.config.user_title} whether to send it."
+            return result
+        if name == "whatsapp_open_chat":
+            return messaging.open_whatsapp_chat(args["contact"])
         if name == "type_my_detail":
             from .config import profile
 

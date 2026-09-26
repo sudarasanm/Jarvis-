@@ -256,3 +256,9 @@ def test_ollama_gets_compact_tools_room_and_keep_alive():
     body = post.requests[0][1]
     assert len(body["tools"]) == len(free_ai.OLLAMA_TOOLS) < len(ai.TOOLS)
     assert body["options"]["num_ctx"] >= 8192 and body["keep_alive"]
+
+
+def test_gemini_timeout_tries_the_other_model():
+    post = FakePost(TimeoutError("The read operation timed out"), gemini_reply({"text": "Here."}))
+    assert free_ai.Gemini(Config(), "k", post=post)("hello") == "Here."
+    assert post.requests[1][0].endswith("gemini-flash-lite-latest:generateContent")

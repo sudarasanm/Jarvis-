@@ -225,7 +225,7 @@ def test_screenshot_is_resized_jpeg(monkeypatch):
     assert size == (3840, 2160)  # real size, for mapping vision coordinates to clicks
     import io
 
-    assert Image.open(io.BytesIO(data)).size == (1600, 900) and data[:2] == b"\xff\xd8"
+    assert Image.open(io.BytesIO(data)).size == (1280, 720) and data[:2] == b"\xff\xd8"
 
 
 def test_gemini_does_a_multi_step_screen_task(windows_desktop, monkeypatch):

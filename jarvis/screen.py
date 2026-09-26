@@ -682,7 +682,7 @@ def close_other_tabs(keep: str | None = None, browser: str | None = None) -> str
 
 # --- screenshots ---------------------------------------------------------------------------------
 
-def screenshot_jpeg(max_width: int = 1600, quality: int = 70) -> tuple[bytes, tuple[int, int]]:
+def screenshot_jpeg(max_width: int = 1280, quality: int = 60) -> tuple[bytes, tuple[int, int]]:
     """Primary-screen screenshot as JPEG bytes, plus the real screen size in pixels."""
     from PIL import ImageGrab
 

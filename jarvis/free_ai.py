@@ -127,6 +127,11 @@ def gemini_generate(config: Config, body: dict, key: str | None = None, post=Non
                     _gemini_resting[model] = time.time() + 3600  # backup model doesn't exist
                     break
                 raise
+            except (TimeoutError, OSError) as e:  # slow or dropped connection: try the other model
+                last_error = e
+                _gemini_resting[model] = time.time() + 20
+                print(f"(Gemini {model} didn't answer in time: {e})")
+                break
     waits = [t - time.time() for t in _gemini_resting.values()]
     raise GeminiUnavailable(max(min(waits) if waits else 60, 5)) from last_error
 
@@ -208,6 +213,9 @@ OLLAMA_TOOLS = {"open_app", "close_app", "new_tab", "close_tab", "list_tabs", "s
                 "set_volume"}
 
 
+OLLAMA_TOOL_ROUNDS = 6  # each round takes a while on a laptop CPU: keep tasks short
+
+
 class Ollama(Assistant):
     """A model running on this PC with Ollama (https://ollama.com). Free and offline."""
 
@@ -227,7 +235,7 @@ class Ollama(Assistant):
             history += [{"role": "user", "content": user}, {"role": "assistant", "content": reply}]
         turn = [{"role": "user", "content": text}]
         try:
-            for _ in range(MAX_TOOL_ROUNDS):
+            for _ in range(OLLAMA_TOOL_ROUNDS):
                 data = self.post(
                     f"{self.config.ollama_url}/api/chat",
                     {

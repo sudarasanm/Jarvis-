@@ -213,12 +213,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dry-run", action="store_true", help="don't actually shut down / restart / sleep")
     parser.add_argument("--background", action="store_true", help="log to ~/.jarvis.log instead of the console")
     parser.add_argument("--stop", action="store_true", help="stop a Jarvis running in the background")
+    parser.add_argument("--setup-email", action="store_true", help="connect your Gmail (app password)")
     parser.add_argument("--logs", action="store_true", help="show what Jarvis is doing, live (run in a second window)")
     parser.add_argument("--list-mics", action="store_true", help="list microphones (for the mic_index setting)")
     args = parser.parse_args(argv)
 
     if args.stop:
         print("Jarvis stopped." if stop_running_instance() else "Jarvis isn't running.")
+        return
+    if args.setup_email:
+        from .messaging import setup_email_interactive
+
+        setup_email_interactive()
         return
     if args.logs:
         follow_log()

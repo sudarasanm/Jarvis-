@@ -61,6 +61,9 @@ To update later: `git pull`, then run the installer again.
 | "install Docker" / "install VLC" | find it in the Windows catalogue (winget), **ask you first**, install it, and tell you when it's done |
 | "what are my laptop specs" / "how much battery is left" / "why is my laptop slow" / "am I connected" | specs, live usage, busiest apps (like Task Manager), Wi-Fi and internet |
 | "set the volume to 40" / "mute" / "brightness 70" / "open bluetooth settings" | volume, brightness, any Settings page |
+| "check my email" / "any unread emails?" / "did I get any job application emails this week?" / "read me the one from HR" | read and summarise your Gmail (needs [email setup](#email-setup)); nothing gets marked as read |
+| "email Priya that I'm free tomorrow" | writes the email, reads it back, and **sends only after your yes** |
+| "send a WhatsApp message to Amma saying I'll be late" / "open the chat with Ravi" | opens the chat and types it; **sends only after your yes** |
 | "type hello world" / "type fourteen twenty six" / "type s u d a r s a n" | type into the app you're using: numbers as digits, spelled letters joined, "… at the rate gmail dot com" as an email |
 | "remember my email is …" / "type my email" / "what's my phone number" / "forget my address" | remember your email, phone, name, address and username on this computer and type them for you |
 | "password is …" | type a password into the focused field: never saved, never sent to the AI, hidden in the log |
@@ -93,6 +96,16 @@ Jarvis uses Gemini first, **switches to Ollama automatically** when Gemini's fre
 - **No card details, no paying.** Jarvis won't store or type card numbers (Amazon and your browser keep your card safely), and when shopping it goes as far as checkout, reads back the item, price and address, and leaves the final "Place order" click to you.
 - Successful instructions happen silently; Jarvis only speaks for answers, questions and problems. Set `"quiet_actions": false` to hear confirmations again.
 - Seeing the screen works on the main monitor, and reading buttons by name works on Windows.
+
+## Email setup
+
+Jarvis reads and sends Gmail directly (not by clicking around the website), using a Google **app password**:
+
+1. Turn on [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification) for your Google account.
+2. Create an app password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (name it "Jarvis") and copy the 16-letter code.
+3. Run `.venv\Scripts\python -m jarvis --setup-email` and paste it when asked.
+
+The app password is stored in Windows Credential Manager, not in a file. You can revoke it any time from the same Google page. Email text you ask Jarvis to summarise goes to the AI brain (Gemini) to be summarised.
 
 ## Hearing you better
 
