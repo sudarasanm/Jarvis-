@@ -38,7 +38,7 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
         if in_conversation:
             heard = listener.listen(timeout=brain.config.conversation_timeout, phrase_limit=20, pause=1.0)
         else:
-            heard = listener.listen(phrase_limit=8, pause=0.7)
+            heard = listener.listen(phrase_limit=8, pause=0.8)
         if heard is None:
             if in_conversation and not always_awake:
                 print(f'(conversation ended; say "{name}" when you need me)')
@@ -189,7 +189,7 @@ def main(argv: list[str] | None = None) -> None:
     speaker.say(f"{config.name} online. At your service, {config.user_title}.")
     try:
         if listener is not None:
-            voice_loop(brain, speaker, listener, always_awake=args.no_wake)
+            voice_loop(brain, speaker, listener, always_awake=args.no_wake or config.always_listen)
         else:
             text_loop(brain, speaker)
     except KeyboardInterrupt:

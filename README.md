@@ -88,6 +88,7 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 | `language` | `en-US` | Speech recognition language |
 | `mic_sensitivity` | `high` | `low`, `normal`, `high` or `max` |
 | `mic_index` | system default | Which microphone (`--list-mics`) |
+| `always_listen` | `false` | `true` = answer everything you say, no "Jarvis" needed |
 | `conversation_timeout` | `12` | Seconds of silence before a conversation ends |
 | `user_title` | `sir` | What Jarvis calls you (or just say "call me ...") |
 | `city` | from your IP | Default weather location |

@@ -66,6 +66,8 @@ class Config:
     mic_sensitivity: str = _setting_field("mic_sensitivity", "high")
     # Which microphone to use (see `python -m jarvis --list-mics`); empty = system default.
     mic_index: int | None = _setting_field("mic_index", None, int)
+    # Answer everything you say, no "Jarvis" needed (same as --no-wake).
+    always_listen: bool = _setting_field("always_listen", False, _flag)
     # Seconds of silence before a conversation ends and Jarvis waits for its name again.
     conversation_timeout: float = _setting_field("conversation_timeout", 12, float)
     # Where email drafts open: "gmail" or "default" (your mail app).

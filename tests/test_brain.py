@@ -24,6 +24,10 @@ def test_wake_word_is_stripped(brain):
     assert brain.strip_wake_word("hey Jervis what time is it") == (True, "what time is it")
     assert brain.strip_wake_word("hey jarvis") == (True, "")
     assert brain.strip_wake_word("goodbye Jarvis") == (True, "goodbye")
+    # "Jarvis" misheard as "where is", but only when a command follows
+    assert brain.strip_wake_word("where is what's time now") == (True, "what's time now")
+    assert brain.strip_wake_word("where is open brave") == (True, "open brave")
+    assert brain.strip_wake_word("where is my phone") == (False, "where is my phone")
 
 
 def test_time_and_date(brain):

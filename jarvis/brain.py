@@ -44,6 +44,11 @@ def skill(*patterns: str):
     return decorator
 
 
+# Words a spoken command or question typically starts with.
+COMMAND_START = (r"(?:what|what's|whats|how|who|when|why|which|can|could|would|will|please|open|close|launch|"
+                 r"tell|say|play|type|press|search|write|send|turn|shut|restart|lock|call|set|show|give|"
+                 r"is|are|do|does|let's|i)\b")
+
 YES = re.compile(r"^(yes|yeah|yep|sure|confirm|do it|go ahead|affirmative|ok(ay)?)\b", re.I)
 NO = re.compile(r"^(no|nope|cancel|stop|never ?mind|abort|negative)\b", re.I)
 
@@ -69,6 +74,11 @@ class Brain:
         """Return (was_addressed, command) for text like 'hey jarvis what time is it'."""
         names = "|".join(re.escape(w) for w in self.config.wake_words)
         m = re.search(rf"\b(?:{names})\b[\s,.!?]*", text, re.I)
+        if not m and self.config.wake_word == "jarvis":
+            # Speech recognition often hears "Jarvis" as "where is". Only trust that at the start of a
+            # sentence and followed by a command ("where is what's the time"), not "where is my phone".
+            m = re.match(rf"\s*(?:hey\s+|ok\s+)?(?:where is|where's|wear is|jar is|java is)[\s,]+(?={COMMAND_START})",
+                         text, re.I)
         if not m:
             return False, text.strip()
         after = text[m.end():].strip()

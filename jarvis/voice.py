@@ -85,9 +85,9 @@ class Listener:
         self.recognizer.energy_threshold = max(self.recognizer.energy_threshold * factor, 30)
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.dynamic_energy_adjustment_ratio = ratio
-        self.recognizer.non_speaking_duration = 0.4
+        self.recognizer.non_speaking_duration = 0.6  # audio kept from before speech starts
 
-    def listen(self, timeout: float | None = None, phrase_limit: float = 8, pause: float = 0.7) -> str | None:
+    def listen(self, timeout: float | None = None, phrase_limit: float = 8, pause: float = 0.8) -> str | None:
         """Record one phrase and return its transcript, or None if nothing intelligible was heard.
 
         pause: seconds of silence that end a phrase (longer in conversation, so you can think mid-sentence).
