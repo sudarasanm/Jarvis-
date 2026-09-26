@@ -103,3 +103,36 @@ def test_unknown_goes_to_fallback():
 
 def test_unknown_without_fallback():
     assert "don't know" in Brain(Config()).handle("recalibrate the arc reactor").text
+
+
+def test_call_me_sets_and_remembers_name(brain):
+    assert "call you Sudarsan" in brain.handle("can you call me as sudarsan").text
+    assert brain.handle("what time is it").text.endswith("Sudarsan.")
+    assert Config().user_title == "Sudarsan"  # persisted for next launch
+
+
+def test_call_me_without_a_name_asks_for_it(brain):
+    # Speech recognition often cuts the sentence at a pause: "call me a" ... "Sudarsan"
+    r = brain.handle("can you call me a")
+    assert "What would you like me to call you" in r.text
+    assert brain.awaiting_reply
+    assert "call you Sudarsan" in brain.handle("Sudarsan").text
+    assert not brain.awaiting_reply
+
+
+def test_broken_skill_does_not_crash():
+    b = Brain(Config(), fallback=lambda text: 1 / 0)
+    assert "something went wrong" in b.handle("what is the meaning of life").text
+
+
+def test_claude_disabled_without_credentials(monkeypatch):
+    pytest.importorskip("anthropic")
+    from jarvis.ai import make_fallback
+
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", "/nonexistent")
+    assert make_fallback(Config()) is None
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert make_fallback(Config()) is not None

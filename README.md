@@ -37,6 +37,7 @@ Say **"Hey Jarvis"** followed by a command, or just "Jarvis", wait for *"Yes, si
 | "search for arc reactor designs" | Google it |
 | "play back in black" | search YouTube |
 | "system status" / "battery" | CPU, memory, battery |
+| "call me Tony" / "my name is Tony" | call you that from now on (remembered in `~/.jarvis.json`) |
 | "tell me a joke", "who are you", "help" | exactly that |
 | "goodbye" | shut Jarvis down |
 | *anything else* | ask Claude (if configured) |
@@ -45,8 +46,11 @@ Say **"Hey Jarvis"** followed by a command, or just "Jarvis", wait for *"Yes, si
 
 Questions Jarvis doesn't recognise ("how far is the moon?", "give me a pasta recipe") go to Claude, and short follow-ups keep their context.
 
+This needs an **API key** from the [Claude Console](https://platform.claude.com). API usage is billed separately from a Claude Pro/Max subscription, so add some credits there first.
+
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...            # macOS / Linux
+setx ANTHROPIC_API_KEY "sk-ant-..."            # Windows (then open a new terminal)
 ```
 
 ## Settings

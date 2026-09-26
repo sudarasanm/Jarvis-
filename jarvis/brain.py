@@ -19,6 +19,8 @@ class Response:
     text: str
     # If set, Jarvis asks for a yes/no and runs this on "yes".
     on_confirm: Callable[[], "Response"] | None = None
+    # If set, Jarvis asked a question and passes the next thing you say to this.
+    on_reply: Callable[[str], "Response"] | None = None
     exit: bool = False
 
 
@@ -47,7 +49,13 @@ class Brain:
         self.config = config or Config()
         self.fallback = fallback
         self._pending: Callable[[], Response] | None = None
+        self._pending_reply: Callable[[str], Response] | None = None
         from . import skills  # noqa: F401  (importing registers every skill)
+
+    @property
+    def awaiting_reply(self) -> bool:
+        """True when Jarvis just asked a question and expects an answer without the wake word."""
+        return self._pending is not None or self._pending_reply is not None
 
     @property
     def title(self) -> str:
@@ -61,14 +69,26 @@ class Brain:
         return True, text[m.end():].strip()
 
     def handle(self, text: str) -> Response:
-        text = text.strip().rstrip(".!?")
-        if not text:
-            return Response(f"Yes, {self.title}?")
+        confirm, reply = self._pending, self._pending_reply
+        self._pending = self._pending_reply = None
+        try:
+            response = self._dispatch(text.strip().rstrip(".!?"), confirm, reply)
+        except Exception as e:  # a broken skill should never take Jarvis down
+            print(f"(error: {e!r})")
+            response = Response(f"Apologies, {self.title}, something went wrong there.")
+        self._pending, self._pending_reply = response.on_confirm, response.on_reply
+        return response
 
-        if self._pending is not None:
-            action, self._pending = self._pending, None
+    def _dispatch(self, text: str, confirm, reply) -> Response:
+        if not text:
+            return Response(f"Yes, {self.title}?", on_confirm=confirm, on_reply=reply)
+
+        if reply is not None:
+            return reply(text)
+
+        if confirm is not None:
             if YES.match(text):
-                return action()
+                return confirm()
             if NO.match(text):
                 return Response(f"Very well, {self.title}. Cancelled.")
             # Anything else: drop the pending action and treat as a new command.
@@ -76,10 +96,7 @@ class Brain:
         for pattern, handler in _SKILLS:
             match = pattern.search(text)
             if match:
-                response = handler(match, self)
-                if response.on_confirm is not None:
-                    self._pending = response.on_confirm
-                return response
+                return handler(match, self)
 
         if self.fallback is not None:
             answer = self.fallback(text)

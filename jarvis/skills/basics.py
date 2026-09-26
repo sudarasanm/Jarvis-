@@ -4,6 +4,7 @@ import random
 from datetime import datetime
 
 from ..brain import Response, skill
+from ..config import save_setting
 
 JOKES = [
     "I would tell you a UDP joke, but you might not get it.",
@@ -29,6 +30,32 @@ def how_are_you(m, brain):
 @skill(r"\bwho are you\b", r"\bwhat('?s| is) your name\b", r"\bintroduce yourself\b")
 def identity(m, brain):
     return Response(f"I am {brain.config.name}, your personal assistant. Just A Rather Very Intelligent System.")
+
+
+FILLER_WORDS = {"a", "an", "as", "the", "by", "is", "me", "it's", "its"}
+
+
+def _set_name(name: str, brain) -> Response:
+    words = name.split()
+    while words and words[0].lower() in FILLER_WORDS:
+        words.pop(0)
+    if not words:
+        return Response("Sorry, I didn't catch that. What would you like me to call you?",
+                        on_reply=lambda text: _set_name(text, brain))
+    name = " ".join(w.capitalize() for w in words[:3])
+    brain.config.user_title = name
+    save_setting("user_title", name)
+    return Response(f"Very well. I'll call you {name} from now on.")
+
+
+@skill(r"\b(?:call me|my name is)(?P<name>(?:\s+[a-z][a-z'-]*){0,4})$")
+def call_me(m, brain):
+    return _set_name(m["name"], brain)
+
+
+@skill(r"\bwhat(?:'?s| is) my name\b", r"\bwho am i\b")
+def my_name(m, brain):
+    return Response(f"You are {brain.title}, of course.")
 
 
 @skill(r"\bwhat time\b", r"\btime is it\b", r"^(the )?time$")

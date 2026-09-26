@@ -12,7 +12,7 @@ from .voice import Listener, Speaker
 
 def voice_loop(brain: Brain, speaker: Speaker, listener: Listener) -> None:
     print(f'Listening... say "Hey {brain.config.name}" followed by a command. Ctrl+C to quit.')
-    awake = False  # True right after the wake word, or while a yes/no confirmation is pending
+    awake = False  # True right after the wake word, or while Jarvis is waiting for an answer
     while True:
         heard = listener.listen(timeout=8 if awake else None)
         if heard is None:
@@ -30,7 +30,7 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener) -> None:
         speaker.say(response.text)
         if response.exit:
             return
-        awake = response.on_confirm is not None
+        awake = brain.awaiting_reply
 
 
 def text_loop(brain: Brain, speaker: Speaker) -> None:
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     brain = Brain(config, fallback=fallback)
     speaker = Speaker(config.name, mute=args.mute)
     if fallback is None:
-        print("(Claude fallback disabled: install `anthropic` and set ANTHROPIC_API_KEY to enable it.)")
+        print("(Claude answers are off: set ANTHROPIC_API_KEY so I can answer general questions.)")
 
     listener = None
     if not args.text:

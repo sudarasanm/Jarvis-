@@ -49,6 +49,9 @@ class ClaudeFallback:
             return f"Claude returned an error, status {e.status_code}."
         except self._anthropic.APIConnectionError:
             return "I can't reach my language servers right now. Check the internet connection."
+        except Exception as e:
+            print(f"(Claude error: {e!r})")
+            return "Something went wrong while I was thinking about that."
 
         if response.stop_reason == "refusal":
             return "I'm afraid I can't help with that one."
@@ -62,6 +65,10 @@ class ClaudeFallback:
 def make_fallback(config: Config):
     """Return a ClaudeFallback, or None if the SDK or credentials are missing."""
     try:
-        return ClaudeFallback(config)
+        fallback = ClaudeFallback(config)
     except Exception:
         return None
+    client = fallback.client
+    if not (client.api_key or client.auth_token or client.credentials):
+        return None
+    return fallback
