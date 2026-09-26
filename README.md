@@ -22,7 +22,7 @@ python -m jarvis --text     # type to it (no microphone needed)
 
 Say **"Hey Jarvis"** followed by a command, or just "Jarvis", wait for *"Yes, sir?"*, then speak.
 
-> **PyAudio install tips:** macOS: `brew install portaudio` first. Linux: `sudo apt install portaudio19-dev python3-pyaudio espeak`. Windows: `pip install pyaudio` usually works out of the box.
+> **PyAudio install tips:** macOS: `brew install portaudio` first. Linux: `sudo apt install portaudio19-dev python3-pyaudio espeak`. Windows: use **Python 3.13 or older**, because PyAudio has no prebuilt Windows package for 3.14 yet and pip would try to compile it (the error says "Microsoft Visual C++ 14.0 or greater is required"). Install 3.13 alongside with `winget install -e --id Python.Python.3.13`, then create the venv with `py -3.13 -m venv .venv`.
 
 ## What it can do
 
