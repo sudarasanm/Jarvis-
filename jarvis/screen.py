@@ -12,7 +12,7 @@ import io
 import platform
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 SYSTEM = platform.system()
 
@@ -53,6 +53,7 @@ class Element:
     name: str
     x: int
     y: int
+    control: object = field(default=None, repr=False, compare=False)  # the live UI Automation control
 
     def __str__(self) -> str:
         return f"{self.kind}: {self.name}"
@@ -240,7 +241,7 @@ def screen_elements(max_items: int = 200, time_limit: float = 5.0) -> list[Eleme
             if key in seen:
                 continue
             seen.add(key)
-            elements.append(Element(kind, name[:150], rect.xcenter(), rect.ycenter()))
+            elements.append(Element(kind, name[:150], rect.xcenter(), rect.ycenter(), control))
         except Exception:
             continue
     return elements
@@ -397,6 +398,77 @@ def close_front_window() -> str:
     title = clean_title(win.title)
     win.close()
     return f"Closed {title}."
+
+
+# --- text boxes ----------------------------------------------------------------------------------
+
+INPUT_KINDS = ("Edit", "ComboBox")
+FIELD_WORDS = re.compile(r"\s+(?:bar|box|field|input|area)$", re.I)
+
+
+def find_input(target: str = "search") -> Element | None:
+    """A text box by what it's for: 'search' finds WhatsApp's "Search or start a new chat" and Chrome's
+    "Address and search bar", 'address' the browser address bar, 'email' an Email field, and so on."""
+    ensure_focus()
+    inputs = [e for e in screen_elements() if e.kind in INPUT_KINDS]
+    wanted = _norm(FIELD_WORDS.sub("", target.strip()))
+    if wanted in ("url", "address", "web address", "link"):
+        wanted = "address"
+    if wanted:
+        hits = [e for e in inputs if wanted in _norm(e.name)]
+        if hits:
+            return hits[0]
+        words = wanted.split()
+        hits = [e for e in inputs if all(w in _norm(e.name) for w in words)]
+        if hits:
+            return hits[0]
+    # Only guess the lone text box when no particular one was asked for ("clear the text").
+    return inputs[0] if len(inputs) == 1 and wanted in ("", "text", "input", "the text") else None
+
+
+def _value(element: Element) -> str | None:
+    try:
+        return element.control.GetValuePattern().Value
+    except Exception:
+        return None
+
+
+def clear_field(target: str = "search") -> str:
+    """Empty a text box and check it really is empty."""
+    import pyautogui
+
+    try:
+        box = find_input(target)
+    except Exception as e:
+        return f"I couldn't read the window to find the {target}: {e}"
+    if box is None:
+        return f"I couldn't find a {target} box on the screen."
+    click_point(box.x, box.y)
+    time.sleep(0.2)
+    pyautogui.hotkey("ctrl", "a")
+    pyautogui.press("backspace")  # typed like a person, so the app notices (search results reset)
+    time.sleep(0.2)
+    if _value(box):
+        try:
+            box.control.GetValuePattern().SetValue("")  # still text there: empty it directly
+        except Exception:
+            pass
+        time.sleep(0.2)
+    left = _value(box)
+    if left:
+        return f"I tried to clear the {box.name}, but it still says {left[:40]}."
+    return f"Cleared the {box.name}."
+
+
+def fill_field(target: str, text: str) -> str:
+    """Clear a text box, then type into it."""
+    from . import computer
+
+    result = clear_field(target)
+    if not result.startswith("Cleared"):
+        return result
+    computer.type_text(text)
+    return f"Typed it into the {target}."
 
 
 def scroll(direction: str = "down", amount: str = "normal") -> str:

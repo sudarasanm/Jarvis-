@@ -57,6 +57,8 @@ when they asked a question or for information, or when you need something from t
 when you're actually chatting.
 - Stay on the app {title} is working in ("working in" in the note): typing, clicking and keys go there \
 until they move to something else.
+- Text boxes: to empty one (a search bar, the address bar, a form field) use clear_field; to replace its text \
+use fill_field. Never do it with separate ctrl+a / backspace key presses.
 - Signing in and filling forms: click the field, then type. For their email, phone, name, address or \
 username use type_my_detail. Never type a password yourself: tell {title} to say "password is" followed by \
 it, and Jarvis types it privately without sending it to you.
@@ -283,6 +285,22 @@ TOOLS = [
         "description": "Open WhatsApp at a chat, without typing anything: by contact name, or by position in the "
                        "chat list (1 = the top chat, which is a pinned one if any are pinned; -1 = the last).",
         "input_schema": {"type": "object", "properties": {"contact": {"type": "string"}, "position": {"type": "integer"}}},
+    },
+    {
+        "name": "clear_field",
+        "description": "Empty a text box, e.g. 'search' (WhatsApp/Chrome/any app's search box), 'address bar', "
+                       "'email'. Checks it really is empty. Use this rather than ctrl+a/backspace.",
+        "input_schema": {"type": "object", "properties": {"field": {"type": "string"}}, "required": ["field"]},
+    },
+    {
+        "name": "fill_field",
+        "description": "Clear a text box (by what it's for, e.g. 'search', 'address bar', 'subject') and type text "
+                       "into it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"field": {"type": "string"}, "text": {"type": "string"}},
+            "required": ["field", "text"],
+        },
     },
     {
         "name": "type_my_detail",
@@ -719,6 +737,10 @@ class Assistant:
                                           client=self.config.email_client)
         if name == "list_windows":
             return screen.list_windows()
+        if name == "clear_field":
+            return screen.clear_field(args["field"])
+        if name == "fill_field":
+            return screen.fill_field(args["field"], args["text"])
         if name == "email_list":
             return messaging.list_emails(args.get("filter") or "unread", int(args.get("limit") or 10))
         if name == "email_read":

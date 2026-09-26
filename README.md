@@ -68,6 +68,7 @@ To update later: `git pull`, then run the installer again.
 | "type hello world" / "type fourteen twenty six" / "type s u d a r s a n" | type into the app you're using: numbers as digits, spelled letters joined, "… at the rate gmail dot com" as an email |
 | "type my email" / "type my phone number" / "what's my email" | types details you saved with `python -m jarvis --details` (typed at the keyboard, so they're exact: speech recognition garbles email addresses) or by voice with "remember my email is …" |
 | "give me account name as Darshan Shiva" / a bare "1400" right after typing | fills that field; carries on typing what you were spelling |
+| "clear the search bar" / "clear the address bar" / "search for Amma in the search bar" | finds the text box by what it's for (WhatsApp, Chrome, Brave, any app), empties it and checks it's really empty; or replaces its text |
 | "password is …" | type a password into the focused field: never saved, never sent to the AI, hidden in the log |
 | "type X in the username field" / "sign in" / "submit" / "allow" | fill in forms and press their buttons |
 | "press enter" / "press control t" / "press alt tab" | press keys |

@@ -37,7 +37,7 @@ class Quiet(str):
 # How successful instructions report back; failures ("I couldn't find...") are always spoken.
 OK_PREFIXES = ("Opening", "Opened", "Closed", "Closing", "Switched", "Clicked", "Double-clicked", "Right-clicked",
                "Scrolled", "Done", "Dismissed", "Now on", "Brought back", "Volume", "Muted", "Sound's back",
-               "Brightness set", "Reloaded", "Went ", "Typed", "Playing", "Here's what I found", "Pressed")
+               "Brightness set", "Reloaded", "Went ", "Typed", "Playing", "Here's what I found", "Pressed", "Cleared")
 
 
 def action(text: str) -> "Response":

@@ -1,5 +1,6 @@
 """Search the web and play things on YouTube."""
 
+import re
 import urllib.parse
 import webbrowser
 
@@ -13,6 +14,8 @@ def open_url(url: str) -> None:
 @skill(r"^(?:play|put on)\s+(?P<q>.+?)(?:\s+on youtube)?$")
 def play(m, brain):
     q = m["q"]
+    if re.search(r"\b(?:text|search (?:bar|box)|field|box|bar|this|that|it)\b", q, re.I):
+        return None  # "play the text in the search" isn't a song
     open_url("https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(q))
     return action(f"Playing {q} on YouTube.")
 

@@ -218,7 +218,7 @@ class Gemini(Assistant):
 # A small model on a laptop CPU chokes on 40 tools: give it the everyday ones.
 OLLAMA_TOOLS = {"open_app", "close_app", "new_tab", "close_tab", "list_tabs", "switch_tab", "tab_action", "switch_window",
                 "type_text", "type_my_detail", "press_keys", "click", "read_screen", "get_weather", "system_info",
-                "set_volume", "whatsapp_message", "whatsapp_open_chat", "email_list"}
+                "set_volume", "whatsapp_message", "whatsapp_open_chat", "email_list", "clear_field", "fill_field"}
 
 
 OLLAMA_TOOL_ROUNDS = 6  # each round takes a while on a laptop CPU: keep tasks short

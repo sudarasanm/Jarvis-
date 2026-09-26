@@ -159,6 +159,20 @@ def forget_detail(m, brain):
 
 # --- forms ----------------------------------------------------------------------------------------
 
+@skill(r"^(?:please\s+)?(?:clear|empty|erase|delete|remove|wipe|reset)\s+(?:out\s+)?(?:all\s+)?(?:of\s+)?(?:the\s+)?"
+       r"(?:text|words|everything|writing)?\s*(?:in|from|on|inside)?\s*(?:the\s+|this\s+|my\s+)?"
+       r"(?P<field>search(?:\s+(?:bar|box|field))?|address bar|url bar|[\w\s-]+?\s+(?:field|box|bar))$",
+       r"^(?:please\s+)?clear\s+(?:the\s+)?search$")
+def clear(m, brain):
+    field = m.groupdict().get("field") or "search"
+    return action(screen.clear_field(field))
+
+
+@skill(r"^(?:please\s+)?search\s+(?:for\s+)?(?P<text>.+?)\s+in\s+(?:the\s+)?search(?:\s+(?:bar|box))?$")
+def search_box(m, brain):
+    return action(screen.fill_field("search", dictation.prepare(m["text"])))
+
+
 @skill(r"^(?:please\s+)?(?:give|put|set|enter|use|fill in|make)\s+(?:me\s+|in\s+)?(?:the\s+|my\s+)?"
        r"(?P<field>account name|user ?name|user id|login|log in|email(?: id| address)?|e-mail)\s+(?:as|to|is|with)\s+(?P<text>.+)$")
 def field_as(m, brain):
@@ -168,9 +182,17 @@ def field_as(m, brain):
 @skill(r"^(?:please\s+)?(?:type|enter|put|fill in|write)\s+(?P<text>.+?)\s+(?:in|into|on)\s+(?:the\s+)?"
        r"(?P<field>[\w\s-]+?)\s+(?:field|box|bar)$")
 def type_into_field(m, brain):
-    result = screen.click(m["field"], locate=lambda t: vision.locate(t, brain.config))
-    if result.startswith("I couldn't"):
-        return Response(result)
+    box = None
+    try:
+        box = screen.find_input(m["field"]) if screen.SYSTEM == "Windows" else None
+    except Exception:
+        box = None
+    if box is not None:  # a real text box by that name: click it (not a same-named button)
+        screen.click_point(box.x, box.y)
+    else:
+        result = screen.click(m["field"], locate=lambda t: vision.locate(t, brain.config))
+        if result.startswith("I couldn't"):
+            return Response(result)
     text = dictation.prepare(m["text"])
     if re.search(r"\b(?:user|account|login|log in|sign in|e-?mail|id)\b", m["field"], re.I):
         text = text.replace(" ", "")  # usernames and emails have no spaces
