@@ -1,6 +1,7 @@
 """Open and close apps, type text, press keys and draft emails."""
 
 import re
+import urllib.parse
 
 from .. import computer, screen, vision
 from ..brain import ASK_AI, Response, skill
@@ -14,6 +15,86 @@ def _complex(text: str, brain) -> bool:
 
 
 BROWSER = r"(?:(?:in|on|from)\s+(?:the\s+|my\s+)?(?P<browser>chrome|google chrome|brave|edge|microsoft edge|firefox))?"
+
+
+BROWSERS = r"(?:chrome|google chrome|brave|edge|microsoft edge|firefox)"
+IN_BROWSER = rf"(?:\s+(?:in|on)\s+(?:the\s+|my\s+)?(?P<browser>{BROWSERS})(?:\s+browser)?)?"
+
+
+def _browser(m, group="browser"):
+    value = m.groupdict().get(group)
+    return value.split()[-1].lower() if value else None
+
+
+def _site(site: str):
+    """("youtube") -> (url, label); "search for X" becomes a Google search."""
+    site = site.strip()
+    query = re.match(r"^(?:search|google|look up)(?:\s+for)?\s+(?P<q>.+)$", site, re.I)
+    if query:
+        return "https://www.google.com/search?q=" + urllib.parse.quote_plus(query["q"]), f"a search for {query['q']}"
+    return computer.url_for(site), site
+
+
+@skill(rf"^(?:please\s+)?(?:open|start|create|make|add)\s+(?:a\s+|the\s+|another\s+|one\s+)?new\s+tab{IN_BROWSER}"
+       r"(?:\s+(?:and\s+|then\s+)?(?P<verb>go\s+to|open|with|for|to|at|load|search(?:\s+for)?|google|look\s+up)"
+       r"\s+(?P<site>.+?))?"
+       rf"(?:\s+(?:in|on)\s+(?:the\s+|my\s+)?(?P<browser2>{BROWSERS}))?$",
+       rf"^(?:a\s+)?new\s+tab{IN_BROWSER}$")
+def new_tab(m, brain):
+    browser = _browser(m) or _browser(m, "browser2")
+    site = m.groupdict().get("site")
+    if site:
+        verb = (m.groupdict().get("verb") or "").lower()
+        url, label = _site(f"search for {site}" if verb.startswith(("search", "google", "look")) else site)
+        return Response(screen.new_tab(browser, url, label))
+    return Response(screen.new_tab(browser))
+
+
+@skill(rf"^(?:please\s+)?(?:open|go to|load)\s+(?P<site>.+?)\s+in\s+(?:a\s+)?new\s+tab{IN_BROWSER}$",
+       rf"^(?:please\s+)?(?:open|go to|load)\s+(?P<site>.+?)\s+(?:in|on|with|using)\s+(?:the\s+|my\s+)?"
+       rf"(?P<browser>{BROWSERS})(?:\s+browser)?$")
+def site_in_browser(m, brain):
+    url, label = _site(m["site"])
+    return Response(screen.new_tab(_browser(m), url, label))
+
+
+@skill(rf"^(?:please\s+)?close\s+(?:this|the current|current|the|that|my)\s+tab{IN_BROWSER}$", r"^close tab$")
+def close_current_tab(m, brain):
+    return Response(screen.tab_action("close", _browser(m)))
+
+
+@skill(rf"^(?:please\s+)?(?:go\s+to\s+|switch\s+to\s+|move\s+to\s+)?(?:the\s+)?"
+       rf"(?P<which>next|previous|prev|last|first)\s+tab{IN_BROWSER}$")
+def next_tab(m, brain):
+    which = {"prev": "previous"}.get(m["which"].lower(), m["which"].lower())
+    return Response(screen.tab_action(which, _browser(m)))
+
+
+@skill(r"\b(?:reopen|re-open|restore|bring back|undo close)\b.*\btabs?\b")
+def reopen_tab(m, brain):
+    return Response(screen.tab_action("reopen"))
+
+
+@skill(rf"^(?:please\s+)?(?:open|start|create)\s+(?:a\s+)?new\s+(?:(?P<private>private|incognito|inprivate|in private)\s+)?"
+       rf"window{IN_BROWSER}$",
+       rf"^(?:please\s+)?(?:open|start|go)\s+(?:an?\s+)?(?:in\s+)?(?P<private2>incognito|private|inprivate|in private)"
+       rf"(?:\s+browsing)?(?:\s+(?:window|tab|mode))?{IN_BROWSER}$")
+def new_window(m, brain):
+    private = m.groupdict().get("private") or m.groupdict().get("private2")
+    return Response(screen.tab_action("private_window" if private else "new_window", _browser(m)))
+
+
+@skill(r"^(?:please\s+)?(?:reload|refresh)(?:\s+(?:the|this))?(?:\s+(?:page|tab))?$", r"^go\s+(?P<dir>back|forward)$")
+def page_nav(m, brain):
+    direction = m.groupdict().get("dir")
+    return Response(screen.tab_action(direction.lower() if direction else "reload"))
+
+
+@skill(rf"^(?:please\s+)?close\s+(?:all\s+)?(?:the\s+)?(?:other\s+)?tabs\s+(?:except|but|apart from)\s+(?:the\s+)?"
+       rf"(?P<keep>.+?)(?:\s+tab)?{IN_BROWSER}$",
+       rf"^(?:please\s+)?close\s+(?:all\s+)?(?:the\s+)?other\s+tabs{IN_BROWSER}$")
+def close_other_tabs(m, brain):
+    return Response(screen.close_other_tabs(m.groupdict().get("keep"), _browser(m)))
 
 
 @skill(rf"^(?:list|show|tell me|what are|which are|read)\b.*\btabs?\b(?:\s+(?:open\s+)?{BROWSER})?(?:\s+open)?$",
@@ -59,7 +140,10 @@ def _email_to(to: str, topic: str, brain) -> Response:
 def open_(m, brain):
     if _complex(m["name"], brain):
         return ASK_AI
-    return Response(computer.open_app(m["name"]))
+    result = computer.open_app(m["name"])
+    if brain.fallback is not None and result.startswith(("I couldn't find", "Sorry, I didn't catch")):
+        return ASK_AI  # nothing was opened; the AI can work out what was meant
+    return Response(result)
 
 
 @skill(r"^(?:please\s+)?(?:close|quit|exit|kill)\s+(?P<name>.+?)(?:\s+(?:for me|please))?$")
@@ -68,7 +152,10 @@ def close(m, brain):
         return ASK_AI
     if m["name"].lower() in {"yourself", "jarvis"}:
         return None  # "close yourself" is handled by the quit skill
-    return Response(computer.close_app(m["name"]))
+    result = computer.close_app(m["name"])
+    if brain.fallback is not None and result.startswith("I can't see"):
+        return ASK_AI  # nothing was closed; the AI can look at tabs and the screen
+    return Response(result)
 
 
 @skill(r"^(?:type|dictate)\s+(?P<text>.+)$")

@@ -61,7 +61,8 @@ confirmed true only after they say yes.
 - Honesty first: only say something worked if the tool result says so. If it failed, say what happened.
 - Never describe windows, tabs or the screen unless you read them in this turn. If you can't see, say so.
 - The "Right now" section below tells you what's open; use it instead of listing windows again.
-- Browser tabs are not windows: use list_tabs, switch_tab and close_tab for them.
+- Browser tabs are not windows: use new_tab, list_tabs, switch_tab, close_tab, tab_action (next, previous, \
+close the current tab, reopen...) and close_other_tabs for them. "Close YouTube" usually means a tab.
 - For tasks inside apps and websites, work step by step like a person: open, wait for it to load, read or \
 look, click or type, and check the result. When you already know several steps, ask for them together.
 - Emails are only drafted; {title} reviews and sends them. Never type passwords or payment details and \
@@ -222,6 +223,39 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {"browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]}},
+        },
+    },
+    {
+        "name": "new_tab",
+        "description": "Open a new browser tab, optionally going to a site (e.g. 'youtube', 'gmail.com') or a URL. "
+                       "Uses the named browser, else the one in front; opens the browser if needed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"site": {"type": "string"},
+                           "browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]}},
+        },
+    },
+    {
+        "name": "tab_action",
+        "description": "Act on the current browser tab/window: next, previous, first, last, close (the current "
+                       "tab), reopen (last closed tab), new_window, private_window, reload, back, forward.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["next", "previous", "first", "last", "close", "reopen",
+                                                      "new_window", "private_window", "reload", "back", "forward"]},
+                "browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "close_other_tabs",
+        "description": "Close every tab in that browser window except one (by title), or except the current tab.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"keep": {"type": "string"},
+                           "browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]}},
         },
     },
     {
@@ -574,6 +608,15 @@ class Assistant:
             return self._command(args["command"], bool(args.get("confirmed")))
         if name == "list_tabs":
             return screen.list_tabs(args.get("browser"))
+        if name == "new_tab":
+            site = args.get("site")
+            if site:
+                return screen.new_tab(args.get("browser"), computer.url_for(site), site)
+            return screen.new_tab(args.get("browser"))
+        if name == "tab_action":
+            return screen.tab_action(args["action"], args.get("browser"))
+        if name == "close_other_tabs":
+            return screen.close_other_tabs(args.get("keep"), args.get("browser"))
         if name == "switch_tab":
             return screen.switch_to_tab(args["title"], args.get("browser"))
         if name == "close_tab":

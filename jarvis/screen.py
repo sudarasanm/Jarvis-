@@ -171,7 +171,7 @@ def foreground_title() -> str:
         import pygetwindow
 
         w = pygetwindow.getActiveWindow()
-        return (w.title or "").strip() if w else ""
+        return clean_title(w.title) if w else ""
     except Exception:
         return ""
 
@@ -471,6 +471,141 @@ def close_tab(title: str, browser: str | None = None) -> str:
     if still_there:
         return f"I tried to close the {tab.title} tab, but it's still open."
     return f"Closed the {tab.title} tab."
+
+
+BROWSER_LABELS = {"chrome": "Chrome", "brave": "Brave", "edge": "Edge", "firefox": "Firefox"}
+BROWSER_APPS = {"chrome": "chrome", "brave": "brave", "edge": "microsoft edge", "firefox": "firefox"}
+
+
+def _browser_key(browser: str | None) -> str | None:
+    return BROWSER_NAMES.get(_norm(browser), _norm(browser)) if browser else None
+
+
+def browser_window(browser: str | None = None):
+    """The browser window to act on: the named browser's, else the one in front, else the most recent."""
+    key = _browser_key(browser)
+    wins = [w for w in _windows() if browser_of(w.title) and (key is None or browser_of(w.title) == key)]
+    if not wins:
+        return None
+    front = foreground_title()
+    return next((w for w in wins if clean_title(w.title) == front), wins[0])  # windows come front-to-back
+
+
+def _front_browser(browser: str | None = None, open_if_missing: bool = True):
+    """Bring the right browser window to the front, opening the browser if needed. (window, just_opened)."""
+    win = browser_window(browser)
+    opened = False
+    if win is None and open_if_missing:
+        from . import computer
+
+        computer.open_app(BROWSER_APPS.get(_browser_key(browser) or "", "microsoft edge"))
+        opened = True
+        for _ in range(20):
+            win = browser_window(browser)
+            if win is not None:
+                break
+            time.sleep(0.5)
+    if win is not None:
+        activate(win)
+    return win, opened
+
+
+def _active_tab_title(win) -> str:
+    title = clean_title(win.title)
+    return re.sub(r"\s+-\s+(?:[^-]+\s+-\s+)?(?:google chrome|brave|microsoft edge|mozilla firefox)$", "",
+                  title, flags=re.I)
+
+
+def new_tab(browser: str | None = None, url: str | None = None, label: str | None = None) -> str:
+    """Open a new tab (optionally at a URL) in the named browser, or the one in front."""
+    if SYSTEM != "Windows":
+        if url:
+            import webbrowser
+
+            webbrowser.open(url, new=2)
+            return f"Opened {label or url}."
+        return "Opening tabs only works on Windows for now."
+    import pyautogui
+
+    win, just_opened = _front_browser(browser)
+    if win is None:
+        return f"I couldn't open {BROWSER_LABELS.get(_browser_key(browser) or '', 'a browser')}."
+    name = BROWSER_LABELS[browser_of(win.title)]
+    if not just_opened:  # a freshly opened browser already shows a new tab
+        pyautogui.hotkey("ctrl", "t")
+        time.sleep(0.4)
+    if url:
+        pyautogui.hotkey("ctrl", "l")  # address bar
+        pyautogui.write(url, interval=0.01)
+        pyautogui.press("enter")
+        return f"Opened {label or url} in a new {name} tab."
+    return f"Opened a new tab in {name}."
+
+
+TAB_KEYS = {
+    "next": ("ctrl", "tab"), "previous": ("ctrl", "shift", "tab"), "first": ("ctrl", "1"), "last": ("ctrl", "9"),
+    "close": ("ctrl", "w"), "reopen": ("ctrl", "shift", "t"), "new_window": ("ctrl", "n"),
+    "private_window": ("ctrl", "shift", "n"), "reload": ("f5",), "back": ("alt", "left"), "forward": ("alt", "right"),
+}
+
+
+def tab_action(action: str, browser: str | None = None) -> str:
+    """next / previous / first / last / close (the current tab) / reopen / new_window / private_window /
+    reload / back / forward."""
+    if action not in TAB_KEYS:
+        return f"I don't know the tab action {action}."
+    if SYSTEM != "Windows":
+        return "Tab controls only work on Windows for now."
+    import pyautogui
+
+    win, just_opened = _front_browser(browser, open_if_missing=action in ("new_window", "private_window"))
+    if win is None:
+        return "No browser is open."
+    name = BROWSER_LABELS[browser_of(win.title)]
+    keys = TAB_KEYS[action]
+    if action == "private_window" and browser_of(win.title) == "firefox":
+        keys = ("ctrl", "shift", "p")
+    current = _active_tab_title(win)
+    pyautogui.hotkey(*keys)
+    time.sleep(0.4)
+    if action == "close":
+        return f"Closed the {current} tab." if current else "Closed the tab."
+    if action in ("next", "previous", "first", "last"):
+        return f"Now on {_active_tab_title(win) or 'the ' + action + ' tab'}."
+    return {"reopen": "Brought back the last closed tab.", "new_window": f"Opened a new {name} window.",
+            "private_window": f"Opened a private {name} window.", "reload": "Reloaded the page.",
+            "back": "Went back.", "forward": "Went forward."}[action]
+
+
+def close_other_tabs(keep: str | None = None, browser: str | None = None) -> str:
+    """Close every tab in that window except `keep` (or except the current tab)."""
+    if SYSTEM != "Windows":
+        return "Tab controls only work on Windows for now."
+    import pyautogui
+
+    if keep:
+        kept = find_tab(keep, browser)
+        if kept is None:
+            return f"I can't find a tab called {keep}."
+        window, kept_title = kept.window, kept.title
+    else:
+        window = browser_window(browser)
+        if window is None:
+            return "No browser is open."
+        kept_title = _active_tab_title(window)
+    closed = 0
+    for _ in range(50):
+        others = [t for t in browser_tabs(browser_of(window.title))
+                  if t.window == window and _norm(t.title) != _norm(kept_title)]
+        if not others:
+            break
+        activate(window)
+        click_point(others[0].x, others[0].y)
+        time.sleep(0.2)
+        pyautogui.hotkey("ctrl", "w")
+        time.sleep(0.3)
+        closed += 1
+    return f"Closed {closed} tab{'s' if closed != 1 else ''} and kept {kept_title}."
 
 
 # --- screenshots ---------------------------------------------------------------------------------

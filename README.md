@@ -46,7 +46,10 @@ To update later: `git pull`, then run the installer again.
 | "Jarvis" | start a conversation: chat, debate, brainstorm, ask anything |
 | "open chrome" / "open terminal" / "open hotstar" / "open photoshop" | open any app or website (unknown apps are found through the Start menu) |
 | "close chrome" / "close settings" / "close notepad" | close the app politely, check it really closed, and force it if it's stuck (never forces apps with unsaved work) |
-| "list the tabs in Chrome" / "close the Gmail tab" / "close Ollama in Chrome" / "switch to the Netflix tab" | manage browser tabs (Chrome, Brave, Edge, Firefox) |
+| "open a new tab" / "new tab in Edge" / "open YouTube in a new tab" / "open Gmail in Chrome" / "open a new tab and search for cricket scores" | open tabs, in the browser you name or the one in front (opening it if needed) |
+| "list the tabs in Chrome" / "close the Gmail tab" / "close YouTube" / "close Ollama in Chrome" / "switch to the Netflix tab" | find tabs by name, switch to them or close them |
+| "close this tab" / "next tab" / "previous tab" / "reopen closed tab" / "close all tabs except Gmail" | the current tab |
+| "open a new window" / "open an incognito window" / "refresh the page" / "go back" | windows and pages |
 | "click Allow" / "click on Amma" / "double click Recycle Bin" / "right click ..." | click things on screen by name (finds them exactly, or looks at the screen) |
 | "scroll down" / "scroll up a lot" | scroll |
 | "what windows are open" / "switch to Brave" | list or switch windows |

@@ -172,6 +172,19 @@ def find_installed_app(name: str) -> tuple[str, str] | None:
     return (close[0], apps[close[0]]) if close else None
 
 
+def url_for(name: str) -> str:
+    """Where to go for a spoken site name: known sites, domains, one-word names, else a Google search."""
+    key = _normalize(name)
+    site = _website_key(key)
+    if site:
+        return WEBSITES[site]
+    if "." in key and " " not in key:
+        return key if key.startswith("http") else f"https://{key}"
+    if " " not in key and key.isalpha():
+        return f"https://www.{key}.com"
+    return "https://www.google.com/search?q=" + urllib.parse.quote_plus(name)
+
+
 def open_app(name: str, settle: float = 1.5) -> str:
     """Open an app or website by its spoken name. Never guesses wildly: says so if it can't find it."""
     import difflib
