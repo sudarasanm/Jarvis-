@@ -57,6 +57,12 @@ when they asked a question or for information, or when you need something from t
 when you're actually chatting.
 - Stay on the app {title} is working in ("You're working in" below): typing, clicking and keys go there \
 until they move to something else.
+- Signing in and filling forms: click the field, then type. For their email, phone, name, address or \
+username use type_my_detail. Never type a password yourself: tell {title} to say "password is" followed by \
+it, and Jarvis types it privately without sending it to you.
+- Shopping (Amazon and the like): search, open the product, pick options, add to cart and go to checkout. \
+Then stop, read back the item, price and delivery address, and ask {title} to click the final "Place \
+order" / "Pay" button themselves. Never enter card details and never place the order yourself.
 - "Close it", "that", "this" mean whatever you were just talking about or the window in front.
 - To get rid of a popup, banner or dialog, use dismiss_popup, not close_app (which closes the whole app).
 - You know this laptop: system_info gives specs, live usage, busy apps (like Task Manager) and network. \
@@ -71,8 +77,7 @@ confirmed true only after they say yes.
 close the current tab, reopen...) and close_other_tabs for them. "Close YouTube" usually means a tab.
 - For tasks inside apps and websites, work step by step like a person: open, wait for it to load, read or \
 look, click or type, and check the result. When you already know several steps, ask for them together.
-- Emails are only drafted; {title} reviews and sends them. Never enter payment details and never buy \
-anything; ask {title} to do those parts.
+- Emails are only drafted; {title} reviews and sends them.
 - Windows administrator prompts ("Do you want to allow this app to make changes") are protected by \
 Windows and no program can click them; ask {title} to click Yes.
 - Notes in square brackets in earlier turns record actions you took. Use them, but never read them out.
@@ -221,6 +226,16 @@ TOOLS = [
             "type": "object",
             "properties": {"command": {"type": "string"}, "confirmed": {"type": "boolean"}},
             "required": ["command"],
+        },
+    },
+    {
+        "name": "type_my_detail",
+        "description": "Type one of the user's saved details (email, phone, name, address, username) into the "
+                       "focused field. You don't see the value. The list of saved ones is under 'Right now'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"field": {"type": "string", "enum": ["email", "phone", "name", "address", "username"]}},
+            "required": ["field"],
         },
     },
     {
@@ -422,6 +437,13 @@ def current_context() -> str:
     lines = ["Right now:"]
     if front:
         lines.append(f"- Window in front: {front}")
+    if screen.working_app():
+        lines.append(f"- You're working in: {screen.working_app()}")
+    from .config import profile
+
+    saved = sorted(profile())
+    if saved:
+        lines.append("- Saved details you can type with type_my_detail: " + ", ".join(saved))
     if wins:
         lines.append("- Open windows: " + "; ".join(dict.fromkeys(wins[:20])))
     return "\n".join(lines) if len(lines) > 1 else ""
@@ -595,6 +617,14 @@ class Assistant:
                                           client=self.config.email_client)
         if name == "list_windows":
             return screen.list_windows()
+        if name == "type_my_detail":
+            from .config import profile
+
+            value = profile().get(args["field"])
+            if not value:
+                return f"No {args['field']} saved. Ask {self.config.user_title} to say: remember my {args['field']} is ..."
+            computer.type_text(value)
+            return f"Typed their {args['field']}."
         if name == "dismiss_popup":
             return screen.dismiss_popup(locate=lambda target: vision.locate(target, self.config))
         if name == "system_info":

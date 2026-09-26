@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from .ai import make_brain
-from .brain import Brain
+from .brain import Brain, redact
 from .config import Config
 from .screen import make_dpi_aware
 from .voice import Listener, Speaker, list_microphones
@@ -53,7 +53,7 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
                 print(f'(conversation ended; say "{name}" when you need me)')
                 in_conversation = False
             continue
-        print(f"You: {heard}")
+        print(f"You: {redact(heard)}")
         addressed, command = brain.strip_wake_word(heard)
         if not (addressed or in_conversation):
             print(f'(no "{name}" heard, ignoring)')

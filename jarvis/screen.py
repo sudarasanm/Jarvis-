@@ -138,6 +138,42 @@ def activate(win) -> None:
     time.sleep(0.4)
 
 
+# The app the user is working in: set whenever Jarvis opens or switches to something, so typing and clicks
+# keep going there.
+_working = {"name": None}
+CONSOLE_HINTS = ("powershell", "command prompt", "python", "windows terminal", "jarvis")
+
+
+def remember_app(name: str | None) -> None:
+    if name:
+        _working["name"] = name
+
+
+def working_app() -> str | None:
+    return _working["name"]
+
+
+def ensure_focus() -> None:
+    """If Jarvis's own console window came to the front, put the user's app back in front before typing."""
+    name = _working["name"]
+    if SYSTEM != "Windows" or not name or any(h in name.lower() for h in CONSOLE_HINTS):
+        return
+    try:
+        import pygetwindow
+
+        front = pygetwindow.getActiveWindow()
+        title = clean_title(front.title).lower() if front is not None else ""
+        own = _own_console()
+        is_console = (own and getattr(front, "_hWnd", None) == own) or any(h in title for h in CONSOLE_HINTS)
+        if front is not None and not is_console:
+            return
+        wins = matching_windows(name)
+        if wins:
+            activate(wins[0])
+    except Exception:
+        pass
+
+
 def list_windows() -> str:
     if SYSTEM != "Windows":
         return "Listing windows only works on Windows for now."
@@ -161,6 +197,7 @@ def switch_to_window(name: str) -> str:
         return f"I can't see a window called {name}."
     win = matches[0]
     activate(win)
+    remember_app(browser_of(win.title) or name)
     return f"Switched to {clean_title(win.title)}."
 
 
@@ -256,6 +293,7 @@ def click(target: str, double: bool = False, right: bool = False, locate=None) -
     accessibility layer can't find it.
     """
     what = "Double-clicked" if double else "Right-clicked" if right else "Clicked"
+    ensure_focus()
     element = None
     if SYSTEM == "Windows":
         try:
@@ -333,6 +371,7 @@ def close_front_window() -> str:
 def scroll(direction: str = "down", amount: str = "normal") -> str:
     import pyautogui
 
+    ensure_focus()
     clicks = {"little": 3, "normal": 8, "lot": 20}.get(amount, 8)
     pyautogui.scroll(clicks * 120 if direction == "up" else -clicks * 120)
     return f"Scrolled {direction}."
@@ -453,6 +492,7 @@ def switch_to_tab(title: str, browser: str | None = None) -> str:
         return f"I can't find a tab called {title}."
     activate(tab.window)
     click_point(tab.x, tab.y)
+    remember_app(tab.browser)
     return f"Switched to the {tab.title} tab."
 
 
@@ -507,6 +547,7 @@ def _front_browser(browser: str | None = None, open_if_missing: bool = True):
             time.sleep(0.5)
     if win is not None:
         activate(win)
+        remember_app(browser_of(win.title))
     return win, opened
 
 
@@ -524,7 +565,7 @@ def new_tab(browser: str | None = None, url: str | None = None, label: str | Non
 
             webbrowser.open(url, new=2)
             return f"Opened {label or url}."
-        return "Opening tabs only works on Windows for now."
+        return "Tabs only work on Windows for now."
     import pyautogui
 
     win, just_opened = _front_browser(browser)

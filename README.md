@@ -61,7 +61,10 @@ To update later: `git pull`, then run the installer again.
 | "install Docker" / "install VLC" | find it in the Windows catalogue (winget), **ask you first**, install it, and tell you when it's done |
 | "what are my laptop specs" / "how much battery is left" / "why is my laptop slow" / "am I connected" | specs, live usage, busiest apps (like Task Manager), Wi-Fi and internet |
 | "set the volume to 40" / "mute" / "brightness 70" / "open bluetooth settings" | volume, brightness, any Settings page |
-| "type hello world" | type into whatever text box is focused |
+| "type hello world" / "type fourteen twenty six" / "type s u d a r s a n" | type into the app you're using: numbers as digits, spelled letters joined, "… at the rate gmail dot com" as an email |
+| "remember my email is …" / "type my email" / "what's my phone number" / "forget my address" | remember your email, phone, name, address and username on this computer and type them for you |
+| "password is …" | type a password into the focused field: never saved, never sent to the AI, hidden in the log |
+| "type X in the username field" / "sign in" / "submit" / "allow" | fill in forms and press their buttons |
 | "press enter" / "press control t" / "press alt tab" | press keys |
 | "write an email to sudar at gmail dot com about the demo" | draft it in Gmail for you to review and send (never sends by itself) |
 | "open chrome and search for today's cricket score" | multi-step tasks (Claude works out the steps) |
@@ -87,7 +90,8 @@ Jarvis uses Gemini first, **switches to Ollama automatically** when Gemini's fre
 
 - **Windows administrator prompts** ("Do you want to allow this app to make changes to your device?") appear on a protected screen that Windows blocks all programs from reading or clicking. When you install something, Jarvis tells you to click **Yes** on it. Normal "Allow / Cancel" popups work.
 - Installing apps and running commands that change the system always need your spoken "yes" first. This is enforced in code, not just by asking the AI nicely.
-- It won't type passwords or payment details, or buy things. It asks you to do those parts.
+- **No card details, no paying.** Jarvis won't store or type card numbers (Amazon and your browser keep your card safely), and when shopping it goes as far as checkout, reads back the item, price and address, and leaves the final "Place order" click to you.
+- Successful instructions happen silently; Jarvis only speaks for answers, questions and problems. Set `"quiet_actions": false` to hear confirmations again.
 - Seeing the screen works on the main monitor, and reading buttons by name works on Windows.
 
 ## Hearing you better

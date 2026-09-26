@@ -80,6 +80,15 @@ CORRECTIONS = [
 ]
 
 
+LONG_NUMBER = re.compile(r"\b\d(?:[ -]?\d){11,18}\b")  # card-like numbers
+SPOKEN_SECRET = re.compile(r"(\b(?:pass\s?word|passcode|pin)\b\s*(?:is|as|number is|:)?\s*).+", re.I)
+
+
+def redact(text: str) -> str:
+    """For printing what was heard: hide passwords and card-like numbers."""
+    return LONG_NUMBER.sub("****", SPOKEN_SECRET.sub(r"\1****", text))
+
+
 def fix_transcript(text: str) -> str:
     for pattern, replacement in CORRECTIONS:
         text = re.sub(pattern, replacement, text, flags=re.I)
@@ -186,7 +195,7 @@ class Brain:
                     return response
 
         if self.fallback is not None:
-            answer = self.fallback(text)
+            answer = self.fallback(LONG_NUMBER.sub("[a long number]", text))  # card numbers never leave here
             if answer:
                 return Response(answer, quiet=isinstance(answer, Quiet))
         return Response(f"I'm afraid I don't know how to do that yet, {self.title}.")

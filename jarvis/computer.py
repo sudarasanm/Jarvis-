@@ -228,6 +228,9 @@ def open_app(name: str, settle: float = 1.5) -> str:
             return open_website(key)
         return f"I couldn't find an app or website called {name}."
     time.sleep(settle)  # give the window a moment so typing afterwards lands in it
+    from . import screen
+
+    screen.remember_app(key)
     return f"Opening {name}."
 
 
@@ -313,9 +316,12 @@ def close_app(name: str, wait: float = 3.0) -> str:
 
 
 def type_text(text: str) -> str:
-    """Type into whichever window has keyboard focus."""
+    """Type into the app the user is working in (whichever window has keyboard focus)."""
     import pyautogui
 
+    from . import screen
+
+    screen.ensure_focus()
     if text.isascii():
         pyautogui.write(text, interval=0.01)
     else:  # pyautogui can only type ASCII; paste anything else
@@ -356,6 +362,9 @@ def press_keys(spoken: str) -> str:
         return f"I don't know the key {spoken}."
     import pyautogui
 
+    from . import screen
+
+    screen.ensure_focus()
     if len(keys) == 1:
         pyautogui.press(keys[0])
     else:

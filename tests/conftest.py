@@ -16,6 +16,7 @@ def fresh_gemini_limits(monkeypatch):
 
     monkeypatch.setattr(free_ai, "_gemini_resting", {})
     monkeypatch.setattr(free_ai, "_thinking_choice", {})
-    from jarvis import ai
+    from jarvis import ai, screen
 
     monkeypatch.setattr(ai, "current_context", lambda: "")
+    monkeypatch.setattr(screen, "_working", {"name": None})

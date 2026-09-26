@@ -234,7 +234,7 @@ def open_settings(page: str = "") -> str:
     key = re.sub(r"\s*settings?$", "", (page or "").lower().strip()).strip()
     uri = SETTINGS_PAGES.get(key, "")
     if SYSTEM != "Windows":
-        return "Opening Settings pages only works on Windows."
+        return "Settings pages only open on Windows."
     os.startfile(f"ms-settings:{uri}")  # type: ignore[attr-defined]
     return f"Opening {key or 'Settings'} settings." if uri else "Opening Settings."
 

@@ -32,6 +32,27 @@ def save_setting(key: str, value) -> None:
         pass
 
 
+# --- personal details you ask Jarvis to remember (email, phone...), kept on this computer only ---
+
+def profile() -> dict:
+    return dict(load_settings().get("profile") or {})
+
+
+def save_profile(field: str, value: str) -> None:
+    data = profile()
+    data[field] = value
+    save_setting("profile", data)
+
+
+def forget_profile(field: str) -> bool:
+    data = profile()
+    if field not in data:
+        return False
+    del data[field]
+    save_setting("profile", data)
+    return True
+
+
 def setting(key: str, default=None):
     env = os.environ.get(f"JARVIS_{key.upper()}")
     if env not in (None, ""):

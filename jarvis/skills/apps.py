@@ -3,8 +3,8 @@
 import re
 import urllib.parse
 
-from .. import computer, screen, vision
-from ..brain import ASK_AI, Response, skill
+from .. import computer, dictation, screen, vision
+from ..brain import ASK_AI, Response, action, skill
 
 ORDINALS = re.compile(r"\b(first|second|third|fourth|fifth|last|next|previous|top|bottom|\d+(st|nd|rd|th))\b", re.I)
 
@@ -46,8 +46,8 @@ def new_tab(m, brain):
     if site:
         verb = (m.groupdict().get("verb") or "").lower()
         url, label = _site(f"search for {site}" if verb.startswith(("search", "google", "look")) else site)
-        return Response(screen.new_tab(browser, url, label))
-    return Response(screen.new_tab(browser))
+        return action(screen.new_tab(browser, url, label))
+    return action(screen.new_tab(browser))
 
 
 @skill(rf"^(?:please\s+)?(?:open|go to|load)\s+(?P<site>.+?)\s+in\s+(?:a\s+)?new\s+tab{IN_BROWSER}$",
@@ -55,24 +55,24 @@ def new_tab(m, brain):
        rf"(?P<browser>{BROWSERS})(?:\s+browser)?$")
 def site_in_browser(m, brain):
     url, label = _site(m["site"])
-    return Response(screen.new_tab(_browser(m), url, label))
+    return action(screen.new_tab(_browser(m), url, label))
 
 
 @skill(rf"^(?:please\s+)?close\s+(?:this|the current|current|the|that|my)\s+tab{IN_BROWSER}$", r"^close tab$")
 def close_current_tab(m, brain):
-    return Response(screen.tab_action("close", _browser(m)))
+    return action(screen.tab_action("close", _browser(m)))
 
 
 @skill(rf"^(?:please\s+)?(?:go\s+to\s+|switch\s+to\s+|move\s+to\s+)?(?:the\s+)?"
        rf"(?P<which>next|previous|prev|last|first)\s+tab{IN_BROWSER}$")
 def next_tab(m, brain):
     which = {"prev": "previous"}.get(m["which"].lower(), m["which"].lower())
-    return Response(screen.tab_action(which, _browser(m)))
+    return action(screen.tab_action(which, _browser(m)))
 
 
 @skill(r"\b(?:reopen|re-open|restore|bring back|undo close)\b.*\btabs?\b")
 def reopen_tab(m, brain):
-    return Response(screen.tab_action("reopen"))
+    return action(screen.tab_action("reopen"))
 
 
 @skill(rf"^(?:please\s+)?(?:open|start|create)\s+(?:a\s+)?new\s+(?:(?P<private>private|incognito|inprivate|in private)\s+)?"
@@ -81,27 +81,27 @@ def reopen_tab(m, brain):
        rf"(?:\s+browsing)?(?:\s+(?:window|tab|mode))?{IN_BROWSER}$")
 def new_window(m, brain):
     private = m.groupdict().get("private") or m.groupdict().get("private2")
-    return Response(screen.tab_action("private_window" if private else "new_window", _browser(m)))
+    return action(screen.tab_action("private_window" if private else "new_window", _browser(m)))
 
 
 @skill(r"^(?:please\s+)?(?:reload|refresh)(?:\s+(?:the|this))?(?:\s+(?:page|tab))?$", r"^go\s+(?P<dir>back|forward)$")
 def page_nav(m, brain):
     direction = m.groupdict().get("dir")
-    return Response(screen.tab_action(direction.lower() if direction else "reload"))
+    return action(screen.tab_action(direction.lower() if direction else "reload"))
 
 
 @skill(rf"^(?:please\s+)?close\s+(?:all\s+)?(?:the\s+)?(?:other\s+)?tabs\s+(?:except|but|apart from)\s+(?:the\s+)?"
        rf"(?P<keep>.+?)(?:\s+tab)?{IN_BROWSER}$",
        rf"^(?:please\s+)?close\s+(?:all\s+)?(?:the\s+)?other\s+tabs{IN_BROWSER}$")
 def close_other_tabs(m, brain):
-    return Response(screen.close_other_tabs(m.groupdict().get("keep"), _browser(m)))
+    return action(screen.close_other_tabs(m.groupdict().get("keep"), _browser(m)))
 
 
 @skill(rf"^(?:list|show|tell me|what are|which are|read)\b.*\btabs?\b(?:\s+(?:open\s+)?{BROWSER})?(?:\s+open)?$",
        r"^(?:what|which) tabs\b.*$")
 def tabs(m, brain):
     browser = m.groupdict().get("browser")
-    return Response(screen.list_tabs(browser.split()[-1].lower() if browser else None))
+    return action(screen.list_tabs(browser.split()[-1].lower() if browser else None))
 
 
 @skill(r"^close\s+(?:the\s+)?(?P<title>.+?)\s+(?:in|on|from)\s+(?:the\s+|my\s+)?"
@@ -112,13 +112,13 @@ def close_tab(m, brain):
     if _complex(m["title"], brain):
         return ASK_AI
     browser = m.groupdict().get("browser")
-    return Response(screen.close_tab(m["title"], browser.split()[-1].lower() if browser else None))
+    return action(screen.close_tab(m["title"], browser.split()[-1].lower() if browser else None))
 
 
 @skill(rf"^(?:switch|go)\s+to\s+(?:the\s+)?(?P<title>.+?)\s+tab\s*{BROWSER}$")
 def switch_tab(m, brain):
     browser = m.groupdict().get("browser")
-    return Response(screen.switch_to_tab(m["title"], browser.split()[-1].lower() if browser else None))
+    return action(screen.switch_to_tab(m["title"], browser.split()[-1].lower() if browser else None))
 
 
 @skill(r"\b(?:write|send|compose|draft)\b.*\be-?mail\b")
@@ -133,7 +133,7 @@ def email(m, brain):
 
 
 def _email_to(to: str, topic: str, brain) -> Response:
-    return Response(computer.compose_email(to, subject=topic.capitalize(), body="", client=brain.config.email_client))
+    return action(computer.compose_email(to, subject=topic.capitalize(), body="", client=brain.config.email_client))
 
 
 @skill(r"^(?:please\s+)?(?:open|launch|go to)\s+(?P<name>.+?)(?:\s+(?:for me|please))?$")
@@ -143,7 +143,7 @@ def open_(m, brain):
     result = computer.open_app(m["name"])
     if brain.fallback is not None and result.startswith(("I couldn't find", "Sorry, I didn't catch")):
         return ASK_AI  # nothing was opened; the AI can work out what was meant
-    return Response(result)
+    return action(result)
 
 
 @skill(r"^(?:please\s+)?(?:close|quit|exit|kill)\s+(?P<name>.+?)(?:\s+(?:for me|please))?$")
@@ -155,17 +155,17 @@ def close(m, brain):
     result = computer.close_app(m["name"])
     if brain.fallback is not None and result.startswith("I can't see"):
         return ASK_AI  # nothing was closed; the AI can look at tabs and the screen
-    return Response(result)
+    return action(result)
 
 
-@skill(r"^(?:type|dictate)\s+(?P<text>.+)$")
+@skill(r"^(?:type|types|typed|dictate)\s+(?P<text>.+)$")
 def type_(m, brain):
-    return Response(computer.type_text(m["text"]))
+    return action(computer.type_text(dictation.prepare(m["text"])))
 
 
 @skill(r"^(?:press|hit)\s+(?P<keys>.+)$")
 def press(m, brain):
-    return Response(computer.press_keys(m["keys"]))
+    return action(computer.press_keys(m["keys"]))
 
 
 @skill(r"^(?:(?P<how>double|right)[ -])?(?:click|tap)(?: on)?\s+(?:the\s+)?(?P<target>.+?)(?:\s+button)?$")
@@ -174,27 +174,27 @@ def click(m, brain):
     if brain.fallback is not None and ORDINALS.search(m["target"]):
         return ASK_AI
     how = (m["how"] or "").lower()
-    return Response(screen.click(m["target"], double=how == "double", right=how == "right",
+    return action(screen.click(m["target"], double=how == "double", right=how == "right",
                                  locate=lambda target: vision.locate(target, brain.config)))
 
 
 @skill(r"^scroll (?P<dir>up|down)(?: (?:a )?(?P<amount>little|lot|bit))?$")
 def scroll(m, brain):
     amount = {"bit": "little"}.get(m["amount"], m["amount"] or "normal")
-    return Response(screen.scroll(m["dir"].lower(), amount))
+    return action(screen.scroll(m["dir"].lower(), amount))
 
 
 @skill(r"^switch (?:to|over to)\s+(?P<name>.+)$")
 def switch(m, brain):
-    return Response(screen.switch_to_window(m["name"]))
+    return action(screen.switch_to_window(m["name"]))
 
 
 @skill(r"\b(?:what|which) windows\b", r"^(?:list|show) (?:all )?(?:the |my )?(?:open )?windows$")
 def windows(m, brain):
-    return Response(screen.list_windows())
+    return action(screen.list_windows())
 
 
 @skill(r"\b(?:list|show|which|what)\b.*\b(?:profiles?|accounts?|users?)\b.*\b(?P<browser>chrome|brave|edge)\b",
        r"\b(?P<browser>chrome|brave|edge)\b.*\b(?:profiles?|accounts?|users?)\b")
 def profiles(m, brain):
-    return Response(computer.list_browser_profiles(m["browser"].lower()))
+    return action(computer.list_browser_profiles(m["browser"].lower()))
