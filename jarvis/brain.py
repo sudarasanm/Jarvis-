@@ -70,6 +70,7 @@ CORRECTIONS = [
      r"|\bchat ?g ?p ?t\b|\bchad ?gpt\b", "ChatGPT"),
     (r"\b(?:o|a)ll?amm?a\b|\bolama\b|\bo lama\b|\bollama\b", "Ollama"),
     (r"\bhot ?star\b", "Hotstar"),
+    (r"\b(?:pind|pint|pinch|pinned)\b(?=\s+(?:chat|contact|conversation|message))", "pinned"),
     (r"^((?:please\s+)?(?:open|close|launch|start|switch to|go to)\s+(?:the\s+)?)(?:string|stream|steem|stim|stean|steem)\b",
      r"\1Steam"),
     (r"\bin (?:the )?(?:string|stream)\b", "in Steam"),

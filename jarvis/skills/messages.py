@@ -28,9 +28,11 @@ ORDINAL = r"(?P<ord>first|second|third|fourth|fifth|sixth|top|last|1st|2nd|3rd|4
 CHAT = r"(?:pinned\s+)?(?:whatsapp\s+)?(?:chat|contact|conversation|person)"
 
 
-@skill(rf"^(?:please\s+)?(?:open|go to)\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{WA}$")
+@skill(rf"^(?:please\s+)?(?:open|go to)\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{WA}$",
+       rf"^(?:please\s+)?(?:open|go to)\s+(?:the\s+|my\s+)?pinned\s+(?:chat|contact|conversation){WA}$")
 def whatsapp_chat_at(m, brain):
-    return action(messaging.open_whatsapp_chat_at(messaging.ORDINALS[m["ord"].lower()]))
+    which = (m.groupdict().get("ord") or "first").lower()
+    return action(messaging.open_whatsapp_chat_at(messaging.ORDINALS[which]))
 
 
 @skill(rf"^(?:please\s+)?(?:send|write)\s+(?:a\s+)?(?:message\s+)?to\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{WA}\s+"

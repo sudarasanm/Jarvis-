@@ -24,6 +24,13 @@ def play(m, brain):
        r"^search (?:google|the web) for\s+(?P<q>.+)$")
 def search(m, brain):
     q = m["q"]
+    from .. import screen
+
+    app = screen.working_app()
+    said_web = re.search(r"\bon (?:google|the web)\b|^google\b|^search (?:google|the web)\b", m.string, re.I)
+    if app and not said_web and app not in screen.BROWSER_LABELS and screen.SYSTEM == "Windows":
+        # Working in WhatsApp (or any app): search inside it, don't wander off to Google.
+        return action(screen.fill_field("search", q).replace("the search", f"{app}'s search"))
     open_url("https://www.google.com/search?q=" + urllib.parse.quote_plus(q))
     return action(f"Here's what I found for {q}.")
 

@@ -406,24 +406,34 @@ INPUT_KINDS = ("Edit", "ComboBox")
 FIELD_WORDS = re.compile(r"\s+(?:bar|box|field|input|area)$", re.I)
 
 
-def find_input(target: str = "search") -> Element | None:
-    """A text box by what it's for: 'search' finds WhatsApp's "Search or start a new chat" and Chrome's
-    "Address and search bar", 'address' the browser address bar, 'email' an Email field, and so on."""
+def find_inputs(target: str = "search") -> list[Element]:
+    """Text boxes by what they're for: 'search' finds WhatsApp's "Search or start a new chat" and Chrome's
+    "Address and search bar", 'address' the browser address bar, 'email' an Email field, and so on.
+    Left-most first (in WhatsApp that's the chat list's search, not the one inside a chat)."""
     ensure_focus()
-    inputs = [e for e in screen_elements() if e.kind in INPUT_KINDS]
+    inputs = sorted((e for e in screen_elements() if e.kind in INPUT_KINDS), key=lambda e: (e.x, e.y))
     wanted = _norm(FIELD_WORDS.sub("", target.strip()))
+    wanted = re.sub(r"^(?:the|this|that|my)\s+", "", wanted)
+    in_chat = bool(re.search(r"\b(?:in|inside) (?:this|the) (?:chat|conversation)\b", target, re.I))
+    wanted = re.sub(r"\s*\b(?:in|inside) (?:this|the) (?:chat|conversation)\b", "", wanted).strip()
     if wanted in ("url", "address", "web address", "link"):
         wanted = "address"
+    hits = []
     if wanted:
         hits = [e for e in inputs if wanted in _norm(e.name)]
-        if hits:
-            return hits[0]
-        words = wanted.split()
-        hits = [e for e in inputs if all(w in _norm(e.name) for w in words)]
-        if hits:
-            return hits[0]
-    # Only guess the lone text box when no particular one was asked for ("clear the text").
-    return inputs[0] if len(inputs) == 1 and wanted in ("", "text", "input", "the text") else None
+        if not hits:
+            words = wanted.split()
+            hits = [e for e in inputs if all(w in _norm(e.name) for w in words)]
+    elif len(inputs) == 1:
+        hits = inputs  # only guess the lone text box when no particular one was asked for ("clear the text")
+    if not hits and wanted in ("text", "input", "the text"):
+        hits = inputs[:1] if len(inputs) == 1 else []
+    return list(reversed(hits)) if in_chat else hits
+
+
+def find_input(target: str = "search") -> Element | None:
+    hits = find_inputs(target)
+    return hits[0] if hits else None
 
 
 def _value(element: Element) -> str | None:
@@ -433,16 +443,18 @@ def _value(element: Element) -> str | None:
         return None
 
 
-def clear_field(target: str = "search") -> str:
+def clear_field(target: str = "search", prefer_filled: bool = True) -> str:
     """Empty a text box and check it really is empty."""
     import pyautogui
 
     try:
-        box = find_input(target)
+        boxes = find_inputs(target)
     except Exception as e:
         return f"I couldn't read the window to find the {target}: {e}"
-    if box is None:
+    if not boxes:
         return f"I couldn't find a {target} box on the screen."
+    # Several matches (WhatsApp has two search boxes): clear the one that actually has text in it.
+    box = next((b for b in boxes if _value(b)), boxes[0]) if prefer_filled else boxes[0]
     click_point(box.x, box.y)
     time.sleep(0.2)
     pyautogui.hotkey("ctrl", "a")
@@ -464,7 +476,7 @@ def fill_field(target: str, text: str) -> str:
     """Clear a text box, then type into it."""
     from . import computer
 
-    result = clear_field(target)
+    result = clear_field(target, prefer_filled=False)  # typing: always the main (left-most) box
     if not result.startswith("Cleared"):
         return result
     computer.type_text(text)
