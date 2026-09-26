@@ -223,3 +223,51 @@ def test_ai_empty_message_just_opens_the_chat(whatsapp):
     assert text == "Opened the chat with Imesai Insight."
     assert not brain.memory.proposals                                  # nothing waiting to be sent
     assert [t for t in whatsapp if t[0] == "type"] == [("type", "Imesai Insight")]  # only the search
+
+
+@pytest.fixture
+def in_whatsapp(monkeypatch):
+    calls = []
+    screen.remember_app("whatsapp")
+    monkeypatch.setattr(messaging, "open_whatsapp_chat", lambda c: calls.append(("open", c)) or f"Opened the chat with {c}.")
+    monkeypatch.setattr(messaging, "open_whatsapp_chat_at", lambda n: calls.append(("at", n)) or "Opened the chat with Imesai.")
+    monkeypatch.setattr(messaging, "_front_whatsapp", lambda: object())
+    monkeypatch.setattr(screen, "clear_field", lambda target, prefer_filled=True: calls.append(("clear", target)) or
+                        "Cleared the Type a message.")
+    monkeypatch.setattr(computer, "type_text", lambda t: calls.append(("type", t)) or "Done.")
+    monkeypatch.setattr(messaging, "send_typed_whatsapp_message", lambda: calls.append(("send",)) or "Sent.")
+    monkeypatch.setattr(computer, "_installed", {"adobe photoshop 2024": "PS"})
+    return calls
+
+
+def test_select_and_go_to_chats_in_whatsapp(in_whatsapp):
+    b = Brain(Config())
+    assert b.handle("select the first chat in the WhatsApp").quiet
+    assert b.handle("go to imsai").text == "Opened the chat with imsai."
+    assert in_whatsapp == [("at", 1), ("open", "imsai")]
+
+
+def test_go_to_still_opens_apps_and_tabs_from_whatsapp(in_whatsapp, monkeypatch):
+    opened = []
+    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5, **kw: opened.append(name) or f"Opening {name}.")
+    b = Brain(Config())
+    b.handle("open chrome")
+    b.handle("open photoshop")
+    assert opened == ["chrome", "photoshop"] and in_whatsapp == []
+
+
+def test_change_the_typed_message_then_send(in_whatsapp):
+    b = Brain(Config())
+    assert b.handle("clear the text in the chat").text == "Cleared the message."
+    r = b.handle("change the message to hey what's up")
+    assert r.text == 'I typed "hey what\'s up" in this chat. Shall I send it?'
+    assert in_whatsapp == [("clear", "type a message"), ("clear", "type a message"), ("type", "hey what's up")]
+    assert b.handle("send it").text == "Sent."   # "send it" is itself the go-ahead
+    assert in_whatsapp[-1] == ("send",)
+
+
+def test_send_it_outside_whatsapp_is_not_a_whatsapp_send(in_whatsapp):
+    screen.remember_app("chrome")
+    asked = []
+    Brain(Config(), fallback=lambda t: asked.append(t) or "ok").handle("send it")
+    assert asked == ["send it"] and ("send",) not in in_whatsapp

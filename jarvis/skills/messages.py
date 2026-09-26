@@ -28,8 +28,12 @@ ORDINAL = r"(?P<ord>first|second|third|fourth|fifth|sixth|top|last|1st|2nd|3rd|4
 CHAT = r"(?:pinned\s+)?(?:whatsapp\s+)?(?:chat|contact|conversation|person)"
 
 
-@skill(rf"^(?:please\s+)?(?:open|go to)\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{WA}$",
-       rf"^(?:please\s+)?(?:open|go to)\s+(?:the\s+|my\s+)?pinned\s+(?:chat|contact|conversation){WA}$")
+PICK = r"(?:open|go to|select|pick|choose|click(?: on)?|tap(?: on)?)"
+IN_WA = r"(?:\s+(?:on|in|from)\s+(?:the\s+)?whatsapp)?"
+
+
+@skill(rf"^(?:please\s+)?{PICK}\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{IN_WA}$",
+       rf"^(?:please\s+)?{PICK}\s+(?:the\s+|my\s+)?pinned\s+(?:chat|contact|conversation){IN_WA}$")
 def whatsapp_chat_at(m, brain):
     which = (m.groupdict().get("ord") or "first").lower()
     return action(messaging.open_whatsapp_chat_at(messaging.ORDINALS[which]))
@@ -79,3 +83,60 @@ def check_email(m, brain):
 def send_email(m, brain):
     # With an AI: it writes the email and sends it (after a yes). Without: the browser draft skill takes it.
     return ASK_AI if brain.fallback is not None and messaging.email_ready() else None
+
+
+# --- while working in WhatsApp -------------------------------------------------------------------
+
+def _in_whatsapp() -> bool:
+    from .. import screen
+
+    return (screen.working_app() or "").lower() == "whatsapp"
+
+
+@skill(r"^(?:please\s+)?(?:go to|open|select|pick|choose)\s+(?:the\s+|my\s+)?(?:chat\s+(?:with|of)\s+)?"
+       r"(?P<contact>[\w .'-]+?)(?:'s)?(?:\s+chat)?$")
+def whatsapp_go_to(m, brain):
+    # "go to imsai" while in WhatsApp means that chat, not an app or website called "imsai".
+    from .. import computer
+
+    contact = m["contact"].strip()
+    key = computer._normalize(contact)
+    if not _in_whatsapp() or computer._website_key(key) or key in computer.WINDOWS_APPS \
+            or key in ("whatsapp", "the chat", "chat", "it", "this", "that") \
+            or re.search(r"\b(?:tab|window|settings|page|folder|file|app)\b", key):
+        return None
+    try:
+        if computer.find_installed_app(key):  # "open photoshop" while in WhatsApp still opens Photoshop
+            return None
+    except Exception:
+        pass
+    return action(messaging.open_whatsapp_chat(contact))
+
+
+@skill(r"^(?:please\s+)?(?:clear|delete|erase|remove|undo)\s+(?:all\s+)?(?:the\s+|this\s+|that\s+|my\s+)?"
+       r"(?:text|message|typed text|typed message|draft|words|writing|what i (?:typed|wrote))"
+       r"(?:\s+(?:in|from|inside)\s+(?:the\s+|this\s+)?(?:chat|message box|text box|compose box|conversation))?$",
+       r"^(?:please\s+)?clear\s+(?:the\s+|this\s+)?(?:chat|message)\s+(?:text|box)$")
+def clear_message(m, brain):
+    # Only ever the message being typed: never the chat history.
+    if not _in_whatsapp():
+        return None
+    return action(messaging.clear_typed_message())
+
+
+@skill(r"^(?:please\s+)?(?:change|replace|edit)\s+(?:the\s+|this\s+|that\s+|my\s+)?(?:message|text|it)\s+"
+       r"(?:to|with|as)\s+(?P<message>.+)$",
+       r"^(?:please\s+)?(?:instead\s+)?(?:say|write)\s+(?P<message>.+?)\s+instead$")
+def change_message(m, brain):
+    if not _in_whatsapp():
+        return None
+    result = messaging.replace_typed_message(m["message"].strip())
+    return _typed_then_ask(result, m["message"].strip(), "this chat")
+
+
+@skill(r"^(?:yes,?\s+)?(?:please\s+|okay\s+|ok\s+)?send(?:\s+(?:it|that|the message|this))?(?:\s+now)?(?:\s+please)?$")
+def send_now(m, brain):
+    # Saying "send it" is the go-ahead itself.
+    if not _in_whatsapp():
+        return None
+    return Response(messaging.send_typed_whatsapp_message())

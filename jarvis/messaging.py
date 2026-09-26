@@ -322,6 +322,25 @@ def type_whatsapp_message(contact: str, message: str) -> str:
     return f"Typed the message in the chat with {contact}; not sent yet."
 
 
+def clear_typed_message() -> str:
+    """Empty WhatsApp's message box (what's being typed). Never touches the chat history."""
+    if _front_whatsapp() is None:
+        return "I couldn't open WhatsApp."
+    result = screen.clear_field("type a message")
+    if result.startswith("I couldn't find"):
+        result = screen.clear_field("message")
+    return result.replace("Cleared the Type a message", "Cleared the message")
+
+
+def replace_typed_message(message: str) -> str:
+    """Replace what's typed in the open chat's message box, WITHOUT sending."""
+    cleared = clear_typed_message()
+    if not cleared.startswith("Cleared"):
+        return cleared
+    computer.type_text(message)
+    return "Typed the message in the open chat; not sent yet."
+
+
 def send_typed_whatsapp_message() -> str:
     import pyautogui
 

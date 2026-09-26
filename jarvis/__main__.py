@@ -216,6 +216,22 @@ def log_to_file() -> None:
     sys.stderr = Tee(sys.stderr, log)
 
 
+def dump_window() -> None:
+    """For fixing an app Jarvis struggles with: everything UI Automation sees in the window in front."""
+    from .screen import foreground_title, make_dpi_aware, screen_elements
+
+    make_dpi_aware()
+    print("Switch to the window you want (e.g. WhatsApp) now; reading it in 5 seconds...")
+    time.sleep(5)
+    elements = screen_elements(max_items=2000, time_limit=30)
+    lines = [f"Window: {foreground_title()}  ({len(elements)} items)"]
+    lines += [f"{e.kind:12s} x={e.x:5d} y={e.y:5d}  {e.name}" for e in elements]
+    out = Path.home() / "jarvis-window-dump.txt"
+    out.write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines[:80]))
+    print(f"\n(Full list saved to {out}; paste it to whoever is fixing Jarvis.)")
+
+
 def follow_log() -> None:
     """Show the log live, like a second window into what Jarvis is doing."""
     print(f"Showing {LOG_FILE} live. Ctrl+C to stop.\n")
@@ -243,6 +259,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dry-run", action="store_true", help="don't actually shut down / restart / sleep")
     parser.add_argument("--background", action="store_true", help="log to ~/.jarvis.log instead of the console")
     parser.add_argument("--stop", action="store_true", help="stop a Jarvis running in the background")
+    parser.add_argument("--dump-window", action="store_true",
+                        help="after 5 seconds, list everything Jarvis can see in the window in front")
     parser.add_argument("--details", action="store_true", help="type in your email, phone, name... once")
     parser.add_argument("--setup-email", action="store_true", help="connect your Gmail (app password)")
     parser.add_argument("--logs", action="store_true", help="show what Jarvis is doing, live (run in a second window)")
@@ -254,6 +272,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.stop:
         print("Jarvis stopped." if stop_running_instance() else "Jarvis isn't running.")
+        return
+    if args.dump_window:
+        dump_window()
         return
     if args.details:
         from .config import edit_details_interactive

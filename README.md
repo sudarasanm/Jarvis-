@@ -65,6 +65,7 @@ To update later: `git pull`, then run the installer again.
 | "email Priya that I'm free tomorrow" | writes the email, reads it back, and **sends only after your yes** |
 | "send a WhatsApp message to Amma saying I'll be late" / "open the chat with Ravi" | opens the chat and types it; **sends only after your yes** |
 | "open the first pinned contact" / "open the last chat" / "send a message to the first chat saying …" / "send … to this chat" | WhatsApp chats by position, or the one that's open |
+| (in WhatsApp) "go to Imesai" / "select the first chat" / "clear the message" / "change the message to hey what's up" / "send it" | move between chats, fix what you've typed (only the message box, never the chat history), and send when you say so |
 | "type hello world" / "type fourteen twenty six" / "type s u d a r s a n" | type into the app you're using: numbers as digits, spelled letters joined, "… at the rate gmail dot com" as an email |
 | "type my email" / "type my phone number" / "what's my email" | types details you saved with `python -m jarvis --details` (typed at the keyboard, so they're exact: speech recognition garbles email addresses) or by voice with "remember my email is …" |
 | "give me account name as Darshan Shiva" / a bare "1400" right after typing | fills that field; carries on typing what you were spelling |
@@ -168,6 +169,7 @@ Edit `%USERPROFILE%\.jarvis.json` (or put `JARVIS_<NAME>=value` lines in a `.env
 .venv\Scripts\python -m jarvis --no-wake  # answer everything, no "Jarvis" needed
 .venv\Scripts\python -m jarvis --stop     # stop the background copy
 .venv\Scripts\python -m jarvis --logs     # in a second window: watch what Jarvis is doing, live
+.venv\Scripts\python -m jarvis --dump-window  # list everything Jarvis can see in the window in front (for fixing app support)
 ```
 
 The console shows timings for every step, like `(heard 2.1s of speech, recognised in 0.8s)` and `(answered in 3.4s)`, so you can see where any delay comes from. When it runs in the background, everything it hears and does is logged to `%USERPROFILE%\.jarvis.log`. Stop the background copy first (only one Jarvis runs at a time).
