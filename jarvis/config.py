@@ -59,7 +59,12 @@ class Config:
     units: str = _setting_field("units", "metric")
     # When true, power commands (shutdown, restart...) are printed instead of executed.
     dry_run: bool = _setting_field("dry_run", False, _flag)
+    # Which AI brain to try first: auto, claude, gemini or ollama. The others (if set up) are backups.
+    ai_provider: str = _setting_field("ai_provider", "auto")
     claude_model: str = _setting_field("claude_model", "claude-opus-5")
+    gemini_model: str = _setting_field("gemini_model", "gemini-flash-latest")
+    ollama_model: str = _setting_field("ollama_model", "llama3.2")
+    ollama_url: str = _setting_field("ollama_url", "http://localhost:11434")
     # Speech recognition language, e.g. en-US, en-GB, en-IN (Indian English), ta-IN (Tamil).
     language: str = _setting_field("language", "en-US")
     # How easily quiet speech is picked up: low, normal, high, max.

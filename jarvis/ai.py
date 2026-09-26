@@ -1,18 +1,22 @@
-"""Claude: Jarvis's conversational brain.
+"""Jarvis's conversational brain.
 
 Handles everything the quick built-in commands don't: open conversation,
 debate, questions, and multi-step computer tasks through tools (open/close
 apps, type, press keys, draft emails, weather).
 
-Enabled when the `anthropic` package is installed and an API key is available,
-either as the ANTHROPIC_API_KEY environment variable or "anthropic_api_key"
-in ~/.jarvis.json.
+Three interchangeable brains, all sharing the same personality and tools:
+  - Claude (paid API)            ANTHROPIC_API_KEY or "anthropic_api_key" in ~/.jarvis.json
+  - Gemini (free tier)           GEMINI_API_KEY or "gemini_api_key" in ~/.jarvis.json   (free_ai.py)
+  - Ollama (free, runs locally)  install Ollama and `ollama pull llama3.2`              (free_ai.py)
+make_brain() uses every one that's set up, and switches to the next when one
+runs out of credit or quota.
 """
 
 from __future__ import annotations
 
 import os
 import platform
+import time
 from datetime import datetime
 
 from . import computer
@@ -122,33 +126,37 @@ MAX_HISTORY_TURNS = 20
 MAX_TOOL_ROUNDS = 8
 
 
-class Claude:
-    def __init__(self, config: Config, api_key: str | None = None, client=None):
-        import anthropic
+class Assistant:
+    """Shared by every brain: personality, tools, conversation memory and availability."""
 
-        self._anthropic = anthropic
-        self.client = client or (anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic())
+    label = "AI"
+
+    def __init__(self, config: Config):
         self.config = config
-        self.turns: list[list[dict]] = []  # each turn: user message, then assistant/tool messages
-        # Optional request features. Dropped automatically if the account or model rejects them.
-        self._extras = {
-            "output_config": {"effort": "low"},
-            "betas": ["server-side-fallback-2026-07-01"],
-            "fallbacks": "default",
-        }
+        self.turns: list[list] = []  # each turn: the user message, then assistant/tool messages
+        self.unavailable_until = 0.0  # set when out of credit/quota, so make_brain() can switch
 
     @property
-    def configured(self) -> bool:
-        c = self.client
-        return bool(c.api_key or c.auth_token or c.credentials)
+    def available(self) -> bool:
+        return time.time() >= self.unavailable_until
 
-    def _system(self) -> str:
+    def pause(self, seconds: float, reason: str) -> None:
+        print(f"({self.label} unavailable for now: {reason})")
+        self.unavailable_until = time.time() + seconds
+
+    def system(self) -> str:
         return SYSTEM_PROMPT.format(
             name=self.config.name,
             title=self.config.user_title,
             os={"Darwin": "Mac", "Windows": "Windows"}.get(platform.system(), platform.system()),
             now=datetime.now().strftime("%A %d %B %Y, %I:%M %p"),
         )
+
+    def history(self) -> list:
+        return [m for turn in self.turns for m in turn]
+
+    def remember(self, turn: list) -> None:
+        self.turns = (self.turns + [turn])[-MAX_HISTORY_TURNS:]
 
     def __call__(self, text: str) -> str | None:
         return self._turn(text)
@@ -157,62 +165,15 @@ class Claude:
         return self._turn(f"{self.config.name}.")
 
     def _turn(self, text: str) -> str | None:
-        history = [m for turn in self.turns for m in turn]
-        turn: list[dict] = [{"role": "user", "content": text}]
-        try:
-            for _ in range(MAX_TOOL_ROUNDS):
-                response = self._create(history + turn)
-                if response.stop_reason == "refusal":
-                    return "I'm afraid I can't help with that one."
-                turn.append({"role": "assistant", "content": response.content})
-                tool_uses = [b for b in response.content if b.type == "tool_use"]
-                if response.stop_reason != "tool_use" or not tool_uses:
-                    break
-                turn.append({"role": "user", "content": [self._run_tool(b) for b in tool_uses]})
-            else:
-                return "That took more steps than I expected, so I stopped. Shall we try it another way?"
-        except self._anthropic.AuthenticationError:
-            return "My connection to Claude isn't authorised. Please check the API key."
-        except self._anthropic.RateLimitError:
-            return "I'm being rate limited at the moment. Give me a few seconds."
-        except self._anthropic.NotFoundError as e:
-            print(f"(Claude error: {error_message(e)})")
-            return f"The model {self.config.claude_model} isn't available on your account. Try another claude_model."
-        except self._anthropic.APIStatusError as e:
-            message = error_message(e)
-            print(f"(Claude error {e.status_code}: {message})")
-            if "credit balance" in message.lower():
-                return ("Your Anthropic account is out of credit. Add some at platform dot claude dot com, "
-                        "under Billing, and I'll be right with you.")
-            return f"Claude rejected that request. It said: {message}"
-        except self._anthropic.APIConnectionError:
-            return "I can't reach my language servers right now. Check the internet connection."
+        raise NotImplementedError
 
-        self.turns = (self.turns + [turn])[-MAX_HISTORY_TURNS:]
-        answer = " ".join(b.text for b in response.content if b.type == "text").strip()
-        return answer or "Done."
-
-    def _create(self, messages: list[dict]):
-        request = dict(model=self.config.claude_model, max_tokens=4096, system=self._system(),
-                       tools=TOOLS, messages=messages)
+    def run_tool(self, name: str, args: dict) -> tuple[str, bool]:
+        """Run one tool call; returns (result text, is_error)."""
+        print(f"(tool: {name} {args})")
         try:
-            return self.client.beta.messages.create(**request, **self._extras)
-        except self._anthropic.BadRequestError as e:
-            message = error_message(e).lower()
-            if not self._extras or not any(k in message for k in ("fallback", "beta", "output_config", "effort")):
-                raise
-            print(f"(Claude rejected optional features, retrying without them: {error_message(e)})")
-            self._extras = {}
-            return self.client.beta.messages.create(**request)
-
-    def _run_tool(self, block) -> dict:
-        args = block.input or {}
-        print(f"(tool: {block.name} {args})")
-        try:
-            result = self._dispatch(block.name, args)
-            return {"type": "tool_result", "tool_use_id": block.id, "content": result}
+            return self._dispatch(name, args or {}), False
         except Exception as e:
-            return {"type": "tool_result", "tool_use_id": block.id, "content": f"Error: {e}", "is_error": True}
+            return f"Error: {e}", True
 
     def _dispatch(self, name: str, args: dict) -> str:
         if name == "open_app":
@@ -238,6 +199,87 @@ class Claude:
         raise ValueError(f"unknown tool {name}")
 
 
+class Claude(Assistant):
+    label = "Claude"
+
+    def __init__(self, config: Config, api_key: str | None = None, client=None):
+        import anthropic
+
+        super().__init__(config)
+        self._anthropic = anthropic
+        self.client = client or (anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic())
+        # Optional request features. Dropped automatically if the account or model rejects them.
+        self._extras = {
+            "output_config": {"effort": "low"},
+            "betas": ["server-side-fallback-2026-07-01"],
+            "fallbacks": "default",
+        }
+
+    @property
+    def configured(self) -> bool:
+        c = self.client
+        return bool(c.api_key or c.auth_token or c.credentials)
+
+    def _turn(self, text: str) -> str | None:
+        history = self.history()
+        turn: list[dict] = [{"role": "user", "content": text}]
+        try:
+            for _ in range(MAX_TOOL_ROUNDS):
+                response = self._create(history + turn)
+                if response.stop_reason == "refusal":
+                    return "I'm afraid I can't help with that one."
+                turn.append({"role": "assistant", "content": response.content})
+                tool_uses = [b for b in response.content if b.type == "tool_use"]
+                if response.stop_reason != "tool_use" or not tool_uses:
+                    break
+                turn.append({"role": "user", "content": [self._run_tool(b) for b in tool_uses]})
+            else:
+                return "That took more steps than I expected, so I stopped. Shall we try it another way?"
+        except self._anthropic.AuthenticationError:
+            self.pause(3600, "API key not accepted")
+            return "My connection to Claude isn't authorised. Please check the API key."
+        except self._anthropic.RateLimitError:
+            self.pause(60, "rate limited")
+            return "I'm being rate limited at the moment. Give me a few seconds."
+        except self._anthropic.NotFoundError as e:
+            print(f"(Claude error: {error_message(e)})")
+            return f"The model {self.config.claude_model} isn't available on your account. Try another claude_model."
+        except self._anthropic.APIStatusError as e:
+            message = error_message(e)
+            print(f"(Claude error {e.status_code}: {message})")
+            if "credit balance" in message.lower():
+                self.pause(3600, "out of credit")
+                return ("Your Anthropic account is out of credit. Add some at platform dot claude dot com, "
+                        "under Billing, and I'll be right with you.")
+            return f"Claude rejected that request. It said: {message}"
+        except self._anthropic.APIConnectionError:
+            return "I can't reach my language servers right now. Check the internet connection."
+
+        self.remember(turn)
+        answer = " ".join(b.text for b in response.content if b.type == "text").strip()
+        return answer or "Done."
+
+    def _create(self, messages: list[dict]):
+        request = dict(model=self.config.claude_model, max_tokens=4096, system=self.system(),
+                       tools=TOOLS, messages=messages)
+        try:
+            return self.client.beta.messages.create(**request, **self._extras)
+        except self._anthropic.BadRequestError as e:
+            message = error_message(e).lower()
+            if not self._extras or not any(k in message for k in ("fallback", "beta", "output_config", "effort")):
+                raise
+            print(f"(Claude rejected optional features, retrying without them: {error_message(e)})")
+            self._extras = {}
+            return self.client.beta.messages.create(**request)
+
+    def _run_tool(self, block) -> dict:
+        result, is_error = self.run_tool(block.name, block.input)
+        out = {"type": "tool_result", "tool_use_id": block.id, "content": result}
+        if is_error:
+            out["is_error"] = True
+        return out
+
+
 def error_message(e) -> str:
     """The human-readable message inside an API error response."""
     body = getattr(e, "body", None)
@@ -256,3 +298,45 @@ def make_claude(config: Config) -> Claude | None:
     except Exception:
         return None
     return claude if claude.configured else None
+
+
+class Failover:
+    """Uses the first available brain, moving on to the next when one is out of credit or quota."""
+
+    def __init__(self, brains: list[Assistant]):
+        self.brains = brains
+
+    @property
+    def names(self) -> str:
+        return ", then ".join(b.label for b in self.brains)
+
+    def _ask(self, method: str, *args) -> str | None:
+        answer = None
+        for brain in self.brains:
+            if not brain.available:
+                continue
+            answer = getattr(brain, method)(*args)
+            if brain.available:
+                return answer
+            # This brain just ran out; try the next one with the same request.
+        return answer or "All my AI brains are unavailable right now. Try again in a little while."
+
+    def __call__(self, text: str) -> str | None:
+        return self._ask("__call__", text)
+
+    def start_conversation(self) -> str | None:
+        return self._ask("start_conversation")
+
+
+def make_brain(config: Config) -> Failover | None:
+    """Every brain that's set up, preferred one first. None if there are none."""
+    from .free_ai import make_gemini, make_ollama
+
+    makers = {"claude": make_claude, "gemini": make_gemini, "ollama": make_ollama}
+    order = ["claude", "gemini", "ollama"]
+    preferred = str(config.ai_provider).lower()
+    if preferred in makers:
+        order.remove(preferred)
+        order.insert(0, preferred)
+    brains = [b for b in (makers[name](config) for name in order) if b is not None]
+    return Failover(brains) if brains else None

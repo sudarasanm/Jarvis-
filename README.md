@@ -23,7 +23,7 @@ Jarvis: Very well, sir. Just say my name if you need me.
    cd Jarvis-
    powershell -ExecutionPolicy Bypass -File install.ps1
    ```
-2. When asked, paste your **Anthropic API key** (see [Claude brain](#claude-brain)) and pick your accent.
+2. When asked, pick an AI brain (Gemini is free, see [AI brain](#ai-brain-free-options)) and your accent.
 
 That's it. The installer:
 - installs Python 3.13 if needed (PyAudio, the microphone library, doesn't support 3.14 on Windows yet),
@@ -56,11 +56,17 @@ To update later: `git pull`, then run the installer again.
 | "play back in black" / "search for arc reactor designs" | YouTube / Google |
 | "system status" / "battery" | CPU, memory, battery |
 
-## Claude brain
+## AI brain (free options)
 
-Conversation, opinions, arguments, emails and multi-step tasks come from Claude. This needs an **API key** from the [Claude Console](https://platform.claude.com) (API Keys → Create Key). The API is billed separately from a Claude Pro/Max subscription, so add a few dollars of credit there first. A spoken reply typically costs a fraction of a cent.
+Conversation, opinions, arguments, emails and multi-step tasks need an AI brain. Jarvis supports three, and the installer asks which one you want:
 
-The installer saves the key in `%USERPROFILE%\.jarvis.json`, **outside the code folder**, so it never ends up on GitHub. Never paste the key into the code itself.
+| Brain | Cost | Setup |
+|---|---|---|
+| **Google Gemini** (recommended) | **Free** tier, no card needed | Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → `"gemini_api_key"` |
+| **Ollama** | **Free**, runs on your PC, works offline | Install [Ollama](https://ollama.com), run `ollama pull llama3.2` (needs 8 GB+ RAM) |
+| **Claude** | Paid API credit (separate from a Claude Pro subscription) | Key from [platform.claude.com](https://platform.claude.com) → `"anthropic_api_key"` |
+
+You can set up more than one. Jarvis uses `ai_provider` first, and **switches to the next automatically** when one runs out of credit or free quota. Keys live in `%USERPROFILE%\.jarvis.json`, **outside the code folder**, so they never end up on GitHub. Never paste a key into the code itself.
 
 ## Hearing you better
 
@@ -74,7 +80,8 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 
 ```json
 {
-  "anthropic_api_key": "sk-ant-...",
+  "ai_provider": "gemini",
+  "gemini_api_key": "AIza...",
   "language": "en-IN",
   "user_title": "sir",
   "city": "Chennai",
@@ -84,6 +91,10 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 
 | Setting | Default | Meaning |
 |---|---|---|
+| `ai_provider` | `auto` | Brain to try first: `gemini`, `ollama`, `claude` (others are backups) |
+| `gemini_api_key` | | Free Gemini key (or set `GEMINI_API_KEY`) |
+| `gemini_model` | `gemini-flash-latest` | Gemini model |
+| `ollama_model` | `llama3.2` | Ollama model (e.g. `qwen2.5:7b` on a stronger PC) |
 | `anthropic_api_key` | | Claude API key (or set `ANTHROPIC_API_KEY`) |
 | `language` | `en-US` | Speech recognition language |
 | `mic_sensitivity` | `high` | `low`, `normal`, `high` or `max` |

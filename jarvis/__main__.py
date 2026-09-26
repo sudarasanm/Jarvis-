@@ -16,7 +16,7 @@ import threading
 import time
 from pathlib import Path
 
-from .ai import make_claude
+from .ai import make_brain
 from .brain import Brain
 from .config import Config
 from .voice import Listener, Speaker, list_microphones
@@ -164,11 +164,14 @@ def main(argv: list[str] | None = None) -> None:
     config = Config()
     if args.dry_run:
         config.dry_run = True
-    claude = make_claude(config)
-    brain = Brain(config, fallback=claude)
+    ai = make_brain(config)
+    brain = Brain(config, fallback=ai)
     speaker = Speaker(config.name, mute=args.mute)
-    if claude is None:
-        print("(Claude is off: set ANTHROPIC_API_KEY, or add \"anthropic_api_key\" to ~/.jarvis.json.)")
+    if ai is None:
+        print("(No AI brain set up, so only built-in commands work. For a free one, add a Gemini key "
+              "(\"gemini_api_key\" in ~/.jarvis.json) or install Ollama. See the README.)")
+    else:
+        print(f"(AI brain: {ai.names})")
 
     listener = None
     if not args.text:

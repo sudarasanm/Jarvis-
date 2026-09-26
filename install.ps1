@@ -64,18 +64,49 @@ Say "Installing packages (this can take a minute)..."
 if ($LASTEXITCODE -ne 0) { throw "Package installation failed. Scroll up for the error." }
 
 # --- 3. Settings (saved in %USERPROFILE%\.jarvis.json, outside the code folder) ---
-$hasKey = & $venvPython -c "import os; from jarvis.config import load_settings; print(bool(os.environ.get('ANTHROPIC_API_KEY') or load_settings().get('anthropic_api_key')))"
-if ("$hasKey".Trim() -ne "True") {
+function Save-Setting($key, $value) {
+    $env:JARVIS_SETUP_KEY = $key
+    $env:JARVIS_SETUP_VALUE = $value
+    & $venvPython -c "import os; from jarvis.config import save_setting; save_setting(os.environ['JARVIS_SETUP_KEY'], os.environ['JARVIS_SETUP_VALUE'])"
+    Remove-Item Env:\JARVIS_SETUP_KEY
+    Remove-Item Env:\JARVIS_SETUP_VALUE
+}
+
+function Read-Secret($prompt) {
+    $secure = Read-Host $prompt -AsSecureString
+    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    return "$plain".Trim()
+}
+
+$hasBrain = & $venvPython -c "from jarvis.config import load_settings; print('ai_provider' in load_settings())"
+if ("$hasBrain".Trim() -ne "True") {
     Write-Host ""
-    Write-Host "Jarvis uses Claude to talk with you. Paste your Anthropic API key (starts with sk-ant-)."
-    Write-Host "Get one at https://platform.claude.com -> API Keys. Press Enter to skip for now."
-    $secure = Read-Host "API key" -AsSecureString
-    $key = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-    if ($key) {
-        $env:JARVIS_SETUP_VALUE = $key.Trim()
-        & $venvPython -c "import os; from jarvis.config import save_setting; save_setting('anthropic_api_key', os.environ['JARVIS_SETUP_VALUE'])"
-        Remove-Item Env:\JARVIS_SETUP_VALUE
-        Say "API key saved."
+    Write-Host "Jarvis needs an AI brain to hold conversations. Which one?"
+    Write-Host "  1) Google Gemini  - FREE, recommended. Needs a free key from https://aistudio.google.com/apikey"
+    Write-Host "  2) Ollama         - FREE, runs on this PC, works offline. Needs 8 GB+ RAM and a 2 GB download"
+    Write-Host "  3) Claude         - paid Anthropic API key with credit"
+    Write-Host "  4) Skip for now   - only built-in commands (time, weather, open/close apps...)"
+    $choice = Read-Host "Choose 1-4 (Enter = 1)"
+    if ($choice -eq "" -or $choice -eq "1") {
+        Write-Host "Open https://aistudio.google.com/apikey, sign in with Google, click 'Create API key' and copy it."
+        Start-Process "https://aistudio.google.com/apikey"
+        $key = Read-Secret "Paste the Gemini API key"
+        if ($key) { Save-Setting "gemini_api_key" $key; Save-Setting "ai_provider" "gemini"; Say "Gemini key saved." }
+    } elseif ($choice -eq "2") {
+        $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+        if (-not (Test-Path $ollama) -and -not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+            Say "Installing Ollama..."
+            winget install -e --id Ollama.Ollama --accept-package-agreements --accept-source-agreements
+        }
+        if (-not (Test-Path $ollama)) { $ollama = "ollama" }
+        Say "Downloading the llama3.2 model (about 2 GB)..."
+        & $ollama pull llama3.2
+        if ($LASTEXITCODE -eq 0) { Save-Setting "ai_provider" "ollama"; Say "Ollama is ready." }
+        else { Write-Host "Ollama setup didn't finish. Start the Ollama app, then run: ollama pull llama3.2" }
+    } elseif ($choice -eq "3") {
+        Write-Host "Get a key at https://platform.claude.com -> API Keys (the account needs credit)."
+        $key = Read-Secret "Paste the Anthropic API key (starts with sk-ant-)"
+        if ($key) { Save-Setting "anthropic_api_key" $key; Save-Setting "ai_provider" "claude"; Say "Claude key saved." }
     }
 }
 
@@ -88,9 +119,7 @@ if ("$hasLang".Trim() -ne "True") {
     $lang = "en-IN"
     if ($choice -eq "2") { $lang = "en-US" }
     if ($choice -eq "3") { $lang = "en-GB" }
-    $env:JARVIS_SETUP_VALUE = $lang
-    & $venvPython -c "import os; from jarvis.config import save_setting; save_setting('language', os.environ['JARVIS_SETUP_VALUE'])"
-    Remove-Item Env:\JARVIS_SETUP_VALUE
+    Save-Setting "language" $lang
 }
 
 # --- 4. Shortcuts: start at login, plus Start / Stop on the desktop ---
