@@ -230,3 +230,21 @@ def test_steam_mishearings():
     assert fix_transcript("open string") == "open Steam"
     assert fix_transcript("click the plus button in the stream") == "click the plus button in Steam"
     assert fix_transcript("I like to stream on Twitch") == "I like to stream on Twitch"
+
+
+def test_installed_app_match_needs_a_whole_word():
+    computer._installed = {"on-screen keyboard": "OSK", "microsoft word": "Word", "steam": "Steam"}
+    try:
+        assert computer.find_installed_app("screen") is None          # not "On-Screen Keyboard"
+        assert computer.find_installed_app("word")[0] == "microsoft word"
+        assert computer.find_installed_app("steam")[0] == "steam"
+    finally:
+        computer._installed = None
+
+
+def test_admin_apps_are_reported_honestly(desktop, monkeypatch):
+    desktop.wins.append(FakeWindow("On-Screen Keyboard", desktop.wins, stubborn=True))
+    desktop.procs["osk"] = desktop.Proc("osk.exe")
+    monkeypatch.setattr(computer.subprocess, "run", lambda cmd, **kw: desktop.killed.append(cmd))  # access denied
+    text = computer.close_app("on-screen keyboard")
+    assert "runs it as administrator" in text and "close it yourself" in text

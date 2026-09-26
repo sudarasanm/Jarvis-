@@ -90,6 +90,8 @@ PROCESS_NAMES = {
     "terminal": ["windowsterminal", "terminal"], "windows terminal": ["windowsterminal"],
     "command prompt": ["cmd"], "paint": ["mspaint"], "task manager": ["taskmgr"],
     "brave": ["brave"], "firefox": ["firefox"], "ollama": ["ollama app", "ollama"],
+    "on-screen keyboard": ["osk"], "onscreen keyboard": ["osk"], "on screen keyboard": ["osk"],
+    "screen keyboard": ["osk"], "steam": ["steam", "steamwebhelper"],
     "settings": ["systemsettings"], "system settings": ["systemsettings"], "chatgpt": ["chatgpt"],
     "spotify": ["spotify"], "whatsapp": ["whatsapp"], "notepad": ["notepad"],
 }
@@ -172,7 +174,8 @@ def find_installed_app(name: str) -> tuple[str, str] | None:
         return None
     if key in apps:
         return key, apps[key]
-    words = [n for n in apps if re.search(rf"\b{re.escape(key)}\b", n)]
+    # Whole words between spaces: "word" finds "microsoft word", but "screen" doesn't find "on-screen keyboard".
+    words = [n for n in apps if re.search(rf"(?:^|\s){re.escape(key)}(?:\s|$)", n)]
     if words:
         best = min(words, key=len)  # "word" -> "word" over "wordpad"; shortest full-word match
         return best, apps[best]
@@ -322,7 +325,8 @@ def close_app(name: str, wait: float = 3.0) -> str:
     time.sleep(1.0)
     left = screen.matching_windows(key) if SYSTEM == "Windows" else []
     if left or _alive(procs):
-        return f"I couldn't close {name}. It may be running as administrator."
+        return (f"I couldn't close {name}: Windows runs it as administrator, and I'm not allowed to close "
+                "administrator apps. Please close it yourself.")
     return f"Closed {name}."
 
 
