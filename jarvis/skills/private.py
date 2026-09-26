@@ -168,6 +168,12 @@ def clear(m, brain):
     return action(screen.clear_field(field))
 
 
+@skill(r"^(?:please\s+)?(?:remove|delete|clear|erase)\s+(?P<text>.+?)\s+(?:from|in|on)\s+(?:the\s+)?"
+       r"(?:left(?:\s+side)?(?:\s+of)?(?:\s+the)?\s+)?search(?:\s+(?:bar|box|field))?$")
+def remove_from_search(m, brain):
+    return action(screen.clear_field("search"))
+
+
 @skill(r"^(?:please\s+)?search\s+(?:for\s+)?(?P<text>.+?)\s+in\s+(?:the\s+)?search(?:\s+(?:bar|box))?$")
 def search_box(m, brain):
     return action(screen.fill_field("search", dictation.prepare(m["text"])))

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import socket
 import sys
 import threading
@@ -35,9 +36,10 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
         print(f'Listening... say "{name}" to start a conversation, or "Hey {name}, <command>". Ctrl+C to quit.')
 
     def say(text: str) -> None:
-        listener.mute()  # don't hear ourselves
+        listener.mute()  # what's heard now is checked only for "stop" (and our own echo is ignored)
         try:
-            speaker.say(text)
+            if not speaker.say(text, interrupted=lambda: stop_requested(listener, text)):
+                print("(stopped talking)")
         finally:
             listener.unmute()
 
@@ -82,6 +84,22 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
         if response.exit:
             return
         in_conversation = always_awake or not response.sleep
+
+
+STOP_WORDS = re.compile(r"^(?:(?:ok(?:ay)?|hey|jarvis)[\s,]+)*(?:stop|be quiet|quiet|shut up|enough|cancel|"
+                        r"pause|hold on|wait|silence|that's enough)(?:[\s,]+(?:stop|it|talking|jarvis|please|now|"
+                        r"there))*[.!]*$", re.I)
+
+
+def stop_requested(listener, speaking: str) -> bool:
+    """Did the user say "stop" (or similar) while Jarvis was talking? Jarvis's own voice doesn't count."""
+    heard = listener.heard_while_speaking()
+    if not heard:
+        return False
+    if STOP_WORDS.match(heard.strip()):
+        print(f"(heard \"{heard}\" while talking)")
+        return True
+    return False
 
 
 def greeting(brain: Brain) -> str:

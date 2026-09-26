@@ -151,6 +151,9 @@ class FakeListener:
     def unmute(self):
         self.muted = False
 
+    def heard_while_speaking(self):
+        return None
+
 
 def run_voice(brain, lines):
     from jarvis.__main__ import voice_loop
@@ -158,7 +161,7 @@ def run_voice(brain, lines):
 
     said = []
     speaker = Speaker(mute=True)
-    speaker.say = said.append
+    speaker.say = lambda text, interrupted=None: said.append(text) or True
     with pytest.raises(StopIteration):
         voice_loop(brain, speaker, FakeListener(lines))
     return said
@@ -213,6 +216,7 @@ def test_listener_drops_its_own_voice_and_keeps_speech_captured_while_busy():
     import queue
 
     listener.phrases, listener.speaking, listener.ignore_before = queue.Queue(), False, 0.0
+    listener.while_speaking = queue.Queue()
     audio = types.SimpleNamespace(frame_data=b"\0" * 32000 * 2, sample_rate=16000, sample_width=2)  # 2 s
 
     listener.mute()

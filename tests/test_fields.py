@@ -181,3 +181,16 @@ def test_pind_is_pinned(monkeypatch):
     assert Brain(Config()).handle("open the Pind chat").text == "Opened the chat with Imesai."
     assert Brain(Config()).handle("open the pinned contact").text == "Opened the chat with Imesai."
     assert opened == [1, 1]
+
+
+def test_remove_text_from_the_left_search_bar(whatsapp_search):
+    box, state = whatsapp_search
+    r = Brain(Config()).handle("remove Pind from the left side of the search bar")
+    assert box.text == "" and r.quiet
+
+
+def test_hidden_note_is_never_spoken():
+    from jarvis import ai
+
+    assert ai.clean_speech("I couldn't find it. [Right now: Saturday, 07:32 PM; Window in front: WhatsApp]") == \
+        "I couldn't find it."

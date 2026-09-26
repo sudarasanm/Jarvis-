@@ -604,6 +604,7 @@ def clean_speech(text: str) -> str:
         text = text[:start] + " " + text[end:]
     text = FUNCTION_CALL.sub(lambda m: " " if _written_call(m) else m.group(0), text)
     text = re.sub(r"\[Actions?:[^\]]*\]", " ", text)
+    text = re.sub(r"\[Right now:[^\]]*\]?", " ", text)  # the hidden time/screen note, if a model repeats it
     text = re.sub(r"https?://\S+", "the link", text)
     text = re.sub(r"[*_#`>]+", "", text)
     return " ".join(text.split())

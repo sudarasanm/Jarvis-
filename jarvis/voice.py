@@ -26,6 +26,7 @@ class Speaker:
     def __init__(self, name: str = "Jarvis", mute: bool = False):
         self.name = name
         self._speak = None
+        self._sapi = None  # the Windows voice, which can speak in the background and be cut off
         if mute:
             return
         if platform.system() == "Windows":
@@ -44,6 +45,7 @@ class Speaker:
                     voice.Voice = voices.Item(i)
                     break
             voice.Rate = 1  # -10 (slow) .. 10 (fast)
+            self._sapi = voice
             return lambda text: voice.Speak(text)  # blocks until finished
         except Exception as e:
             print(f"(Windows speech unavailable, trying pyttsx3: {e!r})")
@@ -71,13 +73,33 @@ class Speaker:
             print(f"(Speech output unavailable: {e!r})")
             return None
 
-    def say(self, text: str) -> None:
+    SPEAK_ASYNC, PURGE = 1, 2  # SAPI flags
+
+    def say(self, text: str, interrupted=None) -> bool:
+        """Speak `text`. If `interrupted()` returns True while speaking (the user said "stop"), stop at once.
+        Returns False if it was cut off."""
         print(f"{self.name}: {text}")
-        if self._speak is not None:
+        if self._speak is None:
+            return True
+        try:
+            if self._sapi is not None and interrupted is not None:
+                self._sapi.Speak(text, self.SPEAK_ASYNC)
+                while not self._sapi.WaitUntilDone(100):
+                    if interrupted():
+                        self.stop()
+                        return False
+                return True
+            self._speak(text)
+        except Exception as e:
+            print(f"(speech error: {e!r})")
+        return True
+
+    def stop(self) -> None:
+        if self._sapi is not None:
             try:
-                self._speak(text)
-            except Exception as e:
-                print(f"(speech error: {e!r})")
+                self._sapi.Speak("", self.SPEAK_ASYNC | self.PURGE)
+            except Exception:
+                pass
 
 
 # How much quieter than the room's background noise speech may be and still count, as
@@ -142,6 +164,7 @@ class Listener:
         self.recognizer.non_speaking_duration = 0.6  # audio kept from before speech starts
         self.phrase_limit = 15
         self.phrases: "queue.Queue" = queue.Queue()
+        self.while_speaking: "queue.Queue" = queue.Queue()  # heard during Jarvis's own speech: checked for "stop"
         self.speaking = False
         self.ignore_before = 0.0
         if start:
@@ -163,8 +186,11 @@ class Listener:
     def _offer(self, audio, ended: float) -> None:
         duration = len(audio.frame_data) / float(audio.sample_rate * audio.sample_width)
         started = ended - duration
-        if self.speaking or started < self.ignore_before:
-            return  # that was Jarvis talking
+        if self.speaking:
+            self.while_speaking.put((started, duration, audio))  # maybe "stop"; maybe our own echo
+            return
+        if started < self.ignore_before:
+            return  # the tail of Jarvis's own voice
         self.phrases.put((started, duration, audio))
 
     # --- while Jarvis talks ---
@@ -175,11 +201,20 @@ class Listener:
     def unmute(self) -> None:
         self.speaking = False
         self.ignore_before = time.time() + 0.25  # the tail of our own voice still echoing
-        while True:
-            try:
-                self.phrases.get_nowait()
-            except queue.Empty:
-                break
+        for q in (self.phrases, self.while_speaking):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+
+    def heard_while_speaking(self) -> str | None:
+        """Recognise one phrase caught while Jarvis was talking, if any (doesn't wait)."""
+        try:
+            _started, duration, audio = self.while_speaking.get_nowait()
+        except queue.Empty:
+            return None
+        return self.recognize(audio, duration)
 
     # --- recognising (main thread) ---
 
