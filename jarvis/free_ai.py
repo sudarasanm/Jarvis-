@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .ai import MAX_TOOL_ROUNDS, TOOLS, Assistant, text_tool_calls
+from .ai import MAX_TOOL_ROUNDS, OLLAMA_SYSTEM_PROMPT, TOOLS, Assistant, text_tool_calls
 from .config import Config, load_settings
 
 
@@ -90,7 +90,7 @@ def _with_thinking(body: dict, option: dict | None) -> dict:
     return {**body, "generationConfig": config}
 
 
-def gemini_generate(config: Config, body: dict, key: str | None = None, post=None, timeout: float = 40) -> dict:
+def gemini_generate(config: Config, body: dict, key: str | None = None, post=None, timeout: float = 15) -> dict:
     """Call Gemini, riding out the free tier's limits: wait out very short limits, rotate to the next
     model (each has its own free quota), and raise GeminiUnavailable when they're all resting."""
     post = post or post_json
@@ -154,11 +154,19 @@ class Gemini(Assistant):
             declarations.append(declaration)
         self.tools = [{"functionDeclarations": declarations}]
 
+    def ping(self) -> bool:
+        try:
+            gemini_generate(self.config, {"contents": [{"role": "user", "parts": [{"text": "Say OK."}]}]},
+                            self.api_key, self.post, timeout=10)
+            return True
+        except Exception:
+            return False
+
     def _turn(self, text: str) -> str | None:
         history = []
         for user, reply in self.past_turns():
             history += [{"role": "user", "parts": [{"text": user}]}, {"role": "model", "parts": [{"text": reply}]}]
-        turn = [{"role": "user", "parts": [{"text": text}]}]
+        turn = [{"role": "user", "parts": [{"text": self.with_situation(text)}]}]
         try:
             for _ in range(MAX_TOOL_ROUNDS):
                 data = gemini_generate(self.config, {
@@ -186,7 +194,7 @@ class Gemini(Assistant):
             else:
                 return TOO_MANY_STEPS
         except GeminiUnavailable as e:
-            self.pause(e.seconds, "free limit reached on every Gemini model")
+            self.pause(max(e.seconds, 60), "free limit reached on every Gemini model")
             return "I've hit Gemini's free limit for the moment. Give me a minute."
         except HTTPError as e:
             print(f"(Gemini error {e.status}: {e.message})")
@@ -200,7 +208,7 @@ class Gemini(Assistant):
                 return "Gemini is having trouble right now."
             return f"Gemini rejected that request. It said: {e.message}"
         except (urllib.error.URLError, TimeoutError, OSError):
-            self.pause(30, "can't reach Gemini")
+            self.pause(60, "can't reach Gemini")
             return OFFLINE
 
         answer = " ".join(p["text"] for p in content["parts"] if p.get("text") and not p.get("thought"))
@@ -210,7 +218,7 @@ class Gemini(Assistant):
 # A small model on a laptop CPU chokes on 40 tools: give it the everyday ones.
 OLLAMA_TOOLS = {"open_app", "close_app", "new_tab", "close_tab", "list_tabs", "switch_tab", "tab_action", "switch_window",
                 "type_text", "type_my_detail", "press_keys", "click", "read_screen", "get_weather", "system_info",
-                "set_volume"}
+                "set_volume", "whatsapp_message", "whatsapp_open_chat", "email_list"}
 
 
 OLLAMA_TOOL_ROUNDS = 6  # each round takes a while on a laptop CPU: keep tasks short
@@ -220,6 +228,7 @@ class Ollama(Assistant):
     """A model running on this PC with Ollama (https://ollama.com). Free and offline."""
 
     label = "Ollama"
+    system_prompt = OLLAMA_SYSTEM_PROMPT
 
     def __init__(self, config: Config, post=post_json):
         super().__init__(config)
@@ -233,7 +242,7 @@ class Ollama(Assistant):
         history = []
         for user, reply in self.past_turns():
             history += [{"role": "user", "content": user}, {"role": "assistant", "content": reply}]
-        turn = [{"role": "user", "content": text}]
+        turn = [{"role": "user", "content": self.with_situation(text)}]
         try:
             for _ in range(OLLAMA_TOOL_ROUNDS):
                 data = self.post(

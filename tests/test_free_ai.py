@@ -55,7 +55,7 @@ def test_gemini_quota_pauses_it_after_trying_every_model():
     assert not g.available
     assert [u.split("/models/")[1] for u, _, _ in post.requests] == [
         "gemini-flash-latest:generateContent", "gemini-flash-lite-latest:generateContent"]
-    assert 15 < g.unavailable_until - __import__("time").time() <= 20  # back when the first model is
+    assert 55 < g.unavailable_until - __import__("time").time() <= 60  # rests; the other brain takes over
 
 
 def test_gemini_waits_out_a_tiny_limit_then_switches_model_for_a_long_one(monkeypatch):
@@ -262,3 +262,53 @@ def test_gemini_timeout_tries_the_other_model():
     post = FakePost(TimeoutError("The read operation timed out"), gemini_reply({"text": "Here."}))
     assert free_ai.Gemini(Config(), "k", post=post)("hello") == "Here."
     assert post.requests[1][0].endswith("gemini-flash-lite-latest:generateContent")
+
+
+def test_instructions_are_identical_between_requests_so_they_can_be_reused(monkeypatch):
+    from datetime import datetime as real_datetime
+
+    post = FakePost({"message": {"role": "assistant", "content": "One."}},
+                    {"message": {"role": "assistant", "content": "Two."}})
+    o = free_ai.Ollama(Config(), post=post)
+    o("first")
+    monkeypatch.setattr(ai, "current_context", lambda: "Right now:\n- Window in front: Steam")
+    o("second")
+    first, second = post.requests[0][1]["messages"], post.requests[1][1]["messages"]
+    assert first[0] == second[0]                       # same system prompt, byte for byte
+    assert len(first[0]["content"]) < 900              # and short, for a laptop CPU
+    assert second[1] == {"role": "user", "content": "first"}  # history is stored without the note
+    assert second[-1]["content"].startswith("second\n\n[Right now: ") and "Steam" in second[-1]["content"]
+
+
+class Flaky(ai.Assistant):
+    def __init__(self, label, fail_times=0):
+        super().__init__(Config())
+        self.label, self.fail_times, self.calls, self.healthy = label, fail_times, 0, True
+
+    def _turn(self, text):
+        self.calls += 1
+        if self.fail_times:
+            self.fail_times -= 1
+            self.pause(60, "limit")
+            return "limit"
+        return f"{self.label}: {text}"
+
+    def ping(self):
+        return self.healthy
+
+
+def test_failover_stays_on_the_backup_until_the_background_check_says_so(monkeypatch):
+    gemini, ollama = Flaky("Gemini", fail_times=1), Flaky("Ollama")
+    brain = ai.Failover([gemini, ollama], background_checks=False)
+    assert brain("one") == "Ollama: one"
+    gemini.unavailable_until = 0          # Gemini's rest is over...
+    assert brain("two") == "Ollama: two"  # ...but we don't go back and gamble on every question
+    assert brain("three") == "Ollama: three"
+    assert gemini.calls == 1
+
+    gemini.healthy = False
+    brain.recheck()                        # background check: still not answering
+    assert brain("four") == "Ollama: four"
+    gemini.healthy = True
+    brain.recheck()                        # background check: it answers again
+    assert brain("five") == "Gemini: five"

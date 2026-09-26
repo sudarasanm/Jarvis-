@@ -175,3 +175,51 @@ def test_ai_whatsapp_needs_yes(whatsapp):
     brain.memory.add("tell amma", "Typed it. Send?", [])
     brain.user_text = "yes"
     assert brain.run_tool("whatsapp_message", {"contact": "Amma", "message": "x", "confirmed": True})[0] == "Sent."
+
+
+class Rect:
+    left, top, right, bottom = 0, 0, 1600, 1000
+
+
+@pytest.fixture
+def chat_list(whatsapp, monkeypatch):
+    monkeypatch.setattr(screen, "_window_rect", lambda: Rect())
+    monkeypatch.setattr(screen, "screen_elements", lambda: [
+        screen.Element("ListItem", "Ravi, 9:02, ok da", 200, 260),
+        screen.Element("ListItem", "Imesai Insight, Pinned, 10:32, meeting at 4", 200, 150),   # top: pinned
+        screen.Element("ListItem", "Amma, Yesterday, Come home by 8", 200, 370),
+        screen.Element("ListItem", "Starred message", 1200, 150),                              # right pane
+        screen.Element("Edit", "Type a message", 900, 950)])
+    return whatsapp
+
+
+def test_open_the_first_pinned_chat(chat_list):
+    r = Brain(Config()).handle("open the first pinned contact")
+    assert r.text == "Opened the chat with Imesai Insight." and r.quiet
+    assert ("click", 200, 150) in chat_list
+    assert Brain(Config()).handle("open the last chat on whatsapp").text == "Opened the chat with Amma."
+
+
+def test_send_to_the_first_chat_asks_first(chat_list):
+    b = Brain(Config())
+    r = b.handle("send a message to the first chat saying see you at 4")
+    assert r.text == 'I typed "see you at 4" in the chat with Imesai Insight. Shall I send it?'
+    assert ("type", "see you at 4") in chat_list and ("press", "enter") not in chat_list
+    assert b.handle("yes").text == "Sent."
+    assert chat_list[-1] == ("press", "enter")
+
+
+def test_send_to_the_open_chat(chat_list):
+    b = Brain(Config())
+    r = b.handle("send I'm on my way to this chat")
+    assert r.text == 'I typed "I\'m on my way" in this chat. Shall I send it?'
+    assert ("click", 900, 950) in chat_list  # the message box
+
+
+def test_ai_empty_message_just_opens_the_chat(whatsapp):
+    brain = ai.Assistant(Config())
+    brain.user_text = "start a new message for imesai insight"
+    text, _ = brain.run_tool("whatsapp_message", {"contact": "Imesai Insight", "message": ""})
+    assert text == "Opened the chat with Imesai Insight."
+    assert not brain.memory.proposals                                  # nothing waiting to be sent
+    assert [t for t in whatsapp if t[0] == "type"] == [("type", "Imesai Insight")]  # only the search

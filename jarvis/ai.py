@@ -55,7 +55,7 @@ screenshot for what read_screen misses (images, profile pictures, video tiles).
 they can see it happen, so no commentary, no follow-up question. Speak properly only when something failed, \
 when they asked a question or for information, or when you need something from them. Save the banter for \
 when you're actually chatting.
-- Stay on the app {title} is working in ("You're working in" below): typing, clicking and keys go there \
+- Stay on the app {title} is working in ("working in" in the note): typing, clicking and keys go there \
 until they move to something else.
 - Signing in and filling forms: click the field, then type. For their email, phone, name, address or \
 username use type_my_detail. Never type a password yourself: tell {title} to say "password is" followed by \
@@ -76,7 +76,8 @@ tool once to prepare, tell {title} in plain words what you're about to do, and c
 confirmed true only after they say yes.
 - Honesty first: only say something worked if the tool result says so. If it failed, say what happened.
 - Never describe windows, tabs or the screen unless you read them in this turn. If you can't see, say so.
-- The "Right now" section below tells you what's open; use it instead of listing windows again.
+- Each message from {title} ends with a [Right now: ...] note: the time, the window in front, open windows, \
+the app they're working in and saved details. Use it instead of listing windows again; never read it out.
 - Browser tabs are not windows: use new_tab, list_tabs, switch_tab, close_tab, tab_action (next, previous, \
 close the current tab, reopen...) and close_other_tabs for them. "Close YouTube" usually means a tab.
 - For tasks inside apps and websites, work step by step like a person: open, wait for it to load, read or \
@@ -89,9 +90,15 @@ Windows and no program can click them; ask {title} to click Yes.
 When {title} simply says your name or hello, you open the conversation: greet them in character, say \
 something that fits the time of day, and ask an engaging question or float an idea. Vary your openers.
 
-Current local time: {now}.
-{context}
 Latency-sensitive; begin your visible answer immediately."""
+
+# For Ollama on a laptop CPU: short, and identical every time, so Ollama can reuse its work between questions.
+OLLAMA_SYSTEM_PROMPT = """You are {name}, a witty, loyal voice assistant like J.A.R.V.I.S. from Iron Man, running on \
+{title}'s {os} computer. Replies are spoken aloud: one or two short sentences, plain words, no lists, JSON or \
+code. Talk like a friend. When {title} gives an instruction, use your tools, then reply with just "Done" if it \
+worked or say plainly what failed; never claim success without a tool result. Never mention tools. Each message \
+ends with a [Right now: ...] note about the time and screen; use it, never read it out. Never type passwords or \
+card details. Sending messages or emails needs {title}'s yes first."""
 
 TOOLS = [
     {
@@ -266,15 +273,16 @@ TOOLS = [
                        "with confirmed=true to send it.",
         "input_schema": {
             "type": "object",
-            "properties": {"contact": {"type": "string"}, "message": {"type": "string"},
-                           "confirmed": {"type": "boolean"}},
-            "required": ["contact", "message"],
+            "properties": {"contact": {"type": "string", "description": "Leave out to use the chat that's open."},
+                           "message": {"type": "string"}, "confirmed": {"type": "boolean"}},
+            "required": ["message"],
         },
     },
     {
         "name": "whatsapp_open_chat",
-        "description": "Open WhatsApp at the chat with a contact, without typing anything.",
-        "input_schema": {"type": "object", "properties": {"contact": {"type": "string"}}, "required": ["contact"]},
+        "description": "Open WhatsApp at a chat, without typing anything: by contact name, or by position in the "
+                       "chat list (1 = the top chat, which is a pinned one if any are pinned; -1 = the last).",
+        "input_schema": {"type": "object", "properties": {"contact": {"type": "string"}, "position": {"type": "integer"}}},
     },
     {
         "name": "type_my_detail",
@@ -573,14 +581,27 @@ class Assistant:
         print(f"({self.label} unavailable for now: {reason})")
         self.unavailable_until = time.time() + seconds
 
+    system_prompt = SYSTEM_PROMPT
+
     def system(self) -> str:
-        return SYSTEM_PROMPT.format(
+        """The instructions. Identical from one request to the next (the changing facts go in situation()),
+        so AI services can reuse their work on it."""
+        return self.system_prompt.format(
             name=self.config.name,
             title=self.config.user_title,
             os={"Darwin": "Mac", "Windows": "Windows"}.get(platform.system(), platform.system()),
-            now=datetime.now().strftime("%A %d %B %Y, %I:%M %p"),
-            context=current_context(),
         )
+
+    def situation(self) -> str:
+        """The time and what's on screen, appended to the user's latest message."""
+        parts = [datetime.now().strftime("%A %d %B %Y, %I:%M %p")]
+        context = current_context()
+        if context:
+            parts.append(context.replace("Right now:\n", "").replace("\n", "; ").replace("- ", ""))
+        return "[Right now: " + "; ".join(parts) + "]"
+
+    def with_situation(self, text: str) -> str:
+        return f"{text}\n\n{self.situation()}"
 
     def past_turns(self) -> list[tuple[str, str]]:
         return self.memory.turns
@@ -609,6 +630,10 @@ class Assistant:
 
     def _turn(self, text: str) -> str | None:
         raise NotImplementedError
+
+    def ping(self) -> bool:
+        """A tiny test request: is this brain answering right now? (Used by the background check.)"""
+        return True
 
     def run_tool(self, name: str, args: dict) -> tuple[str, bool]:
         """Run one tool call; returns (result text, is_error)."""
@@ -686,13 +711,20 @@ class Assistant:
                 if self.memory.confirmed("whatsapp_send", self.user_text) is None:
                     return f"Not sent: {self.config.user_title} hasn't said yes yet."
                 return messaging.send_typed_whatsapp_message()
-            result = messaging.type_whatsapp_message(args["contact"], args["message"])
+            if not (args.get("message") or "").strip():  # nothing to say yet: just open the chat
+                return messaging.open_whatsapp_chat(args["contact"]) if args.get("contact") else "What should I send?"
+            if args.get("contact"):
+                result = messaging.type_whatsapp_message(args["contact"], args["message"])
+            else:
+                result = messaging.type_in_open_chat(args["message"])
             if "not sent yet" in result:
                 self.memory.propose("whatsapp_send")
                 result += f" Ask {self.config.user_title} whether to send it."
             return result
         if name == "whatsapp_open_chat":
-            return messaging.open_whatsapp_chat(args["contact"])
+            if args.get("position"):
+                return messaging.open_whatsapp_chat_at(int(args["position"]))
+            return messaging.open_whatsapp_chat(args.get("contact") or "")
         if name == "type_my_detail":
             from .config import profile
 
@@ -790,7 +822,7 @@ class Claude(Assistant):
         history = []
         for user, reply in self.past_turns():
             history += [{"role": "user", "content": user}, {"role": "assistant", "content": reply}]
-        turn: list[dict] = [{"role": "user", "content": text}]
+        turn: list[dict] = [{"role": "user", "content": self.with_situation(text)}]
         try:
             for _ in range(MAX_TOOL_ROUNDS):
                 response = self._create(history + turn)
@@ -868,13 +900,46 @@ def make_claude(config: Config) -> Claude | None:
 
 
 class Failover:
-    """Uses the first available brain, moving on to the next when one is out of credit or quota."""
+    """Sticks with one brain. When it fails (limit reached, not responding) Jarvis moves to the next one and
+    stays there, instead of retrying the failing one on every question. A background check tries the preferred
+    brain every couple of minutes and switches back once it answers again."""
 
-    def __init__(self, brains: list[Assistant]):
+    RECHECK_EVERY = 120  # seconds
+
+    def __init__(self, brains: list[Assistant], background_checks: bool = True):
         self.brains = brains
         self.memory = Memory()
+        self.current = 0
+        self.background_checks = background_checks
+        self._checker = None
         for brain in brains:
             brain.memory = self.memory
+
+    @property
+    def active(self) -> Assistant:
+        return self.brains[self.current]
+
+    def _switch_to(self, index: int) -> None:
+        if index == self.current:
+            return
+        print(f"(switching to {self.brains[index].label}; staying on it until {self.brains[0].label} works again)")
+        self.current = index
+        if index > 0 and self.background_checks:
+            self._start_checker()
+
+    def _start_checker(self) -> None:
+        import threading
+
+        if self._checker is not None and self._checker.is_alive():
+            return
+
+        def check():
+            while self.current > 0:
+                time.sleep(self.RECHECK_EVERY)
+                self.recheck()
+
+        self._checker = threading.Thread(target=check, name="brain check", daemon=True)
+        self._checker.start()
 
     @property
     def names(self) -> str:
@@ -882,15 +947,34 @@ class Failover:
 
     def _ask(self, method: str, *args) -> str | None:
         answer = None
-        for brain in self.brains:
+        for index in range(self.current, len(self.brains)):
+            brain = self.brains[index]
             if not brain.available:
                 continue
+            self._switch_to(index)
             print(f"(asking {brain.label}...)")
             answer = getattr(brain, method)(*args)
             if brain.available:
                 return answer
-            # This brain just ran out; try the next one with the same request.
+            # This brain just failed; the next one answers this request, and the ones after it.
+        for index in range(0, self.current):  # everything after us failed: maybe an earlier one is back
+            brain = self.brains[index]
+            if brain.available:
+                self._switch_to(index)
+                print(f"(asking {brain.label}...)")
+                answer = getattr(brain, method)(*args)
+                if brain.available:
+                    return answer
         return answer or "All my AI brains are unavailable right now. Try again in a little while."
+
+    def recheck(self) -> None:
+        """Try the brains ahead of the current one; switch back to the first that answers."""
+        for index in range(self.current):
+            brain = self.brains[index]
+            if brain.available and brain.ping():
+                print(f"({brain.label} is working again: switching back)")
+                self.current = index
+                return
 
     def set_notifier(self, notify) -> None:
         for brain in self.brains:

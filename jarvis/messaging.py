@@ -209,12 +209,8 @@ def _whatsapp_window():
     return wins[0] if wins else None
 
 
-def open_whatsapp_chat(contact: str) -> str:
-    """Open WhatsApp and the chat with `contact` (as it appears in WhatsApp). Doesn't type or send anything."""
-    import pyautogui
-
-    if screen.SYSTEM != "Windows":
-        return "WhatsApp control only works on Windows for now."
+def _front_whatsapp():
+    """WhatsApp's window, opened if needed and brought to the front. None if it won't open."""
     win = _whatsapp_window()
     if win is None:
         computer.open_app("whatsapp")
@@ -223,10 +219,75 @@ def open_whatsapp_chat(contact: str) -> str:
             win = _whatsapp_window()
             if win is not None:
                 break
+    if win is not None:
+        screen.activate(win)
+        screen.remember_app("whatsapp")
+    return win
+
+
+ORDINALS = {"first": 1, "top": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4,
+            "fifth": 5, "5th": 5, "sixth": 6, "6th": 6, "last": -1}
+
+
+def chat_name(item_name: str) -> str:
+    """'Amma, Pinned, 10:32, Come home by 8' -> 'Amma'."""
+    return item_name.split(",")[0].strip()
+
+
+def chat_list() -> list:
+    """The chats in WhatsApp's left-hand list, top to bottom (pinned chats come first)."""
+    elements = screen.screen_elements()
+    rect = screen._window_rect()
+    left_edge = rect.left + (rect.right - rect.left) * 0.45 if rect is not None else float("inf")
+    items = [e for e in elements if e.kind == "ListItem" and e.x < left_edge]
+    return sorted(items, key=lambda e: e.y)
+
+
+def open_whatsapp_chat_at(position: int) -> str:
+    """Open the chat at a position in the chat list: 1 = the top one (a pinned chat, if any), -1 = the last."""
+    import pyautogui
+
+    if screen.SYSTEM != "Windows":
+        return "WhatsApp control only works on Windows for now."
+    if _front_whatsapp() is None:
+        return "I couldn't open WhatsApp."
+    pyautogui.press("esc")  # leave any search, back to the full chat list
+    time.sleep(0.5)
+    chats = chat_list()
+    if not chats:
+        return "I can't see WhatsApp's chat list."
+    index = position - 1 if position > 0 else position
+    if not -len(chats) <= index < len(chats):
+        return f"There are only {len(chats)} chats showing."
+    chat = chats[index]
+    screen.click_point(chat.x, chat.y)
+    time.sleep(0.8)
+    return f"Opened the chat with {chat_name(chat.name)}."
+
+
+def type_in_open_chat(message: str) -> str:
+    """Type into the chat that's open in WhatsApp, WITHOUT sending."""
+    if _front_whatsapp() is None:
+        return "I couldn't open WhatsApp."
+    try:
+        box = screen.find_element("type a message", screen.screen_elements())
+        if box is not None:
+            screen.click_point(box.x, box.y)
+    except Exception:
+        pass
+    computer.type_text(message)
+    return "Typed the message in the open chat; not sent yet."
+
+
+def open_whatsapp_chat(contact: str) -> str:
+    """Open WhatsApp and the chat with `contact` (as it appears in WhatsApp). Doesn't type or send anything."""
+    import pyautogui
+
+    if screen.SYSTEM != "Windows":
+        return "WhatsApp control only works on Windows for now."
+    win = _front_whatsapp()
     if win is None:
         return "I couldn't open WhatsApp."
-    screen.activate(win)
-    screen.remember_app("whatsapp")
     pyautogui.hotkey("ctrl", "f")  # search chats
     time.sleep(0.4)
     pyautogui.hotkey("ctrl", "a")

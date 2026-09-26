@@ -64,6 +64,7 @@ To update later: `git pull`, then run the installer again.
 | "check my email" / "any unread emails?" / "did I get any job application emails this week?" / "read me the one from HR" | read and summarise your Gmail (needs [email setup](#email-setup)); nothing gets marked as read |
 | "email Priya that I'm free tomorrow" | writes the email, reads it back, and **sends only after your yes** |
 | "send a WhatsApp message to Amma saying I'll be late" / "open the chat with Ravi" | opens the chat and types it; **sends only after your yes** |
+| "open the first pinned contact" / "open the last chat" / "send a message to the first chat saying …" / "send … to this chat" | WhatsApp chats by position, or the one that's open |
 | "type hello world" / "type fourteen twenty six" / "type s u d a r s a n" | type into the app you're using: numbers as digits, spelled letters joined, "… at the rate gmail dot com" as an email |
 | "remember my email is …" / "type my email" / "what's my phone number" / "forget my address" | remember your email, phone, name, address and username on this computer and type them for you |
 | "password is …" | type a password into the focused field: never saved, never sent to the AI, hidden in the log |
@@ -87,7 +88,7 @@ Conversation, opinions, arguments, emails, seeing the screen and multi-step task
 | **Ollama** | **Free**, runs on your PC, works offline | Install [Ollama](https://ollama.com), run `ollama pull llama3.2` (needs 8 GB+ RAM) |
 | **Claude** | Paid API credit (separate from a Claude Pro subscription) | Key from [platform.claude.com](https://platform.claude.com) → `"anthropic_api_key"` |
 
-Jarvis uses Gemini first, **switches to Ollama automatically** when Gemini's free limit runs out or the internet is down, and goes back to Gemini once it recovers. Claude is only used if you add a key with credit. Looking at the screen needs Gemini (or an Ollama vision model set as `ollama_vision_model`). Keys live in `%USERPROFILE%\.jarvis.json`, **outside the code folder**, so they never end up on GitHub. Never paste a key into the code itself.
+Jarvis uses Gemini first. When Gemini's free limit runs out or it stops answering, Jarvis **switches to Ollama and stays there**, checking Gemini quietly in the background every two minutes and switching back only once it answers again, so you never wait on a failing Gemini. To use only Ollama, set `"ai_provider": "ollama"`. Claude is only used if you add a key with credit. Looking at the screen needs Gemini (or an Ollama vision model set as `ollama_vision_model`). Keys live in `%USERPROFILE%\.jarvis.json`, **outside the code folder**, so they never end up on GitHub. Never paste a key into the code itself.
 
 ## What it can't do
 

@@ -70,7 +70,8 @@ def test_start_conversation_and_request_shape():
     claude = ai.Claude(Config(user_title="Sudarsan"), client=client)
     assert claude.start_conversation() == "Good morning. Sleep well?"
     req = client.requests[0]
-    assert req["messages"] == [{"role": "user", "content": "Jarvis."}]
+    content = req["messages"][0]["content"]
+    assert content.startswith("Jarvis.\n\n[Right now: ") and content.endswith("]")
     assert "Sudarsan" in req["system"] and "push back" in req["system"]
     assert req["model"] == "claude-opus-5" and req["fallbacks"] == "default"
     assert {t["name"] for t in req["tools"]} >= {"open_app", "close_app", "type_text", "compose_email"}

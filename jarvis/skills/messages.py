@@ -1,5 +1,7 @@
 """WhatsApp messages and email. Sending always waits for the user's yes."""
 
+import re
+
 from .. import messaging
 from ..brain import ASK_AI, Response, action, skill
 
@@ -13,10 +15,45 @@ SAYS = r"(?:saying|that says|that|telling (?:him|her|them)|to say|:)"
        rf"^(?:please\s+)?(?:tell|message|text)\s+(?P<contact>.+?)\s+on\s+whatsapp\s+(?:that\s+|saying\s+)?(?P<message>.+)$")
 def whatsapp_send(m, brain):
     contact, message = m["contact"].strip(), m["message"].strip()
+    if re.fullmatch(rf"(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}", contact, re.I):
+        return None  # "the first chat" is a position, not a name: whatsapp_send_at handles it
     result = messaging.type_whatsapp_message(contact, message)
     if "not sent yet" not in result:
         return Response(result)
     return Response(f'I typed "{message}" in the chat with {contact}. Shall I send it?',
+                    on_confirm=lambda: Response(messaging.send_typed_whatsapp_message()))
+
+
+ORDINAL = r"(?P<ord>first|second|third|fourth|fifth|sixth|top|last|1st|2nd|3rd|4th|5th|6th)"
+CHAT = r"(?:pinned\s+)?(?:whatsapp\s+)?(?:chat|contact|conversation|person)"
+
+
+@skill(rf"^(?:please\s+)?(?:open|go to)\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{WA}$")
+def whatsapp_chat_at(m, brain):
+    return action(messaging.open_whatsapp_chat_at(messaging.ORDINALS[m["ord"].lower()]))
+
+
+@skill(rf"^(?:please\s+)?(?:send|write)\s+(?:a\s+)?(?:message\s+)?to\s+(?:the\s+|my\s+)?{ORDINAL}\s+{CHAT}{WA}\s+"
+       rf"{SAYS}\s+(?P<message>.+)$")
+def whatsapp_send_at(m, brain):
+    opened = messaging.open_whatsapp_chat_at(messaging.ORDINALS[m["ord"].lower()])
+    if not opened.startswith("Opened"):
+        return Response(opened)
+    who = opened.removeprefix("Opened the chat with ").rstrip(".")
+    return _typed_then_ask(messaging.type_in_open_chat(m["message"].strip()), m["message"].strip(), who)
+
+
+@skill(r"^(?:please\s+)?(?:send|reply)\s+(?:a\s+message\s+)?(?:saying\s+)?(?P<message>.+?)\s+"
+       r"(?:to|in)\s+(?:this|the current|the open|that)\s+chat$")
+def whatsapp_send_here(m, brain):
+    return _typed_then_ask(messaging.type_in_open_chat(m["message"].strip()), m["message"].strip(), "this chat")
+
+
+def _typed_then_ask(result: str, message: str, who: str) -> Response:
+    if "not sent yet" not in result:
+        return Response(result)
+    where = who if who == "this chat" else f"the chat with {who}"
+    return Response(f'I typed "{message}" in {where}. Shall I send it?',
                     on_confirm=lambda: Response(messaging.send_typed_whatsapp_message()))
 
 
