@@ -26,6 +26,23 @@ class Response:
     sleep: bool = False
     # Quit the program entirely.
     exit: bool = False
+    # An instruction that worked: just do it, don't talk about it (see the quiet_actions setting).
+    quiet: bool = False
+
+
+class Quiet(str):
+    """An AI reply that only confirms an action ("Done"), so it needn't be spoken."""
+
+
+# How successful instructions report back; failures ("I couldn't find...") are always spoken.
+OK_PREFIXES = ("Opening", "Opened", "Closed", "Closing", "Switched", "Clicked", "Double-clicked", "Right-clicked",
+               "Scrolled", "Done", "Dismissed", "Now on", "Brought back", "Volume", "Muted", "Sound's back",
+               "Brightness set", "Reloaded", "Went ", "Typed", "Playing", "Here's what I found", "Pressed")
+
+
+def action(text: str) -> "Response":
+    """The Response for an instruction: silent if it worked, spoken if it didn't."""
+    return Response(text, quiet=text.startswith(OK_PREFIXES))
 
 
 # A handler may return None to pass to later skills, or ASK_AI to hand the request straight to the AI
@@ -171,5 +188,5 @@ class Brain:
         if self.fallback is not None:
             answer = self.fallback(text)
             if answer:
-                return Response(answer)
+                return Response(answer, quiet=isinstance(answer, Quiet))
         return Response(f"I'm afraid I don't know how to do that yet, {self.title}.")

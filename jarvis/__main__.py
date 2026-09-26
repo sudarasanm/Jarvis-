@@ -66,7 +66,10 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
             continue
         response = brain.handle(command)
         print(f"(answered in {time.time() - begun:.1f}s)")
-        say(response.text)
+        if response.quiet and brain.config.quiet_actions:
+            print(f"(done: {response.text})")
+        else:
+            say(response.text)
         last_activity = time.time()
         if response.exit:
             return
@@ -98,7 +101,10 @@ def text_loop(brain: Brain, speaker: Speaker) -> None:
             speaker.say(greeting(brain))
             continue
         response = brain.handle(command)
-        speaker.say(response.text)
+        if response.quiet and brain.config.quiet_actions:
+            print(f"(done: {response.text})")
+        else:
+            speaker.say(response.text)
         if response.exit or response.sleep:
             return
 

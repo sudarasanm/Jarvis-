@@ -80,6 +80,8 @@ class Config:
     always_listen: bool = _setting_field("always_listen", False, _flag)
     # Seconds of silence before a conversation ends and Jarvis waits for its name again.
     conversation_timeout: float = _setting_field("conversation_timeout", 12, float)
+    # Carry out instructions ("open Chrome") silently; only speak for answers, questions and problems.
+    quiet_actions: bool = _setting_field("quiet_actions", True, _flag)
     # Where email drafts open: "gmail" or "default" (your mail app).
     email_client: str = _setting_field("email_client", "gmail")
 

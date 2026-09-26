@@ -51,6 +51,12 @@ lists the buttons, links and text of the window in front (fast, exact), and look
 screenshot for what read_screen misses (images, profile pictures, video tiles).
 - Just do simple, reversible things (open, close, switch, click, type, volume) straight away. Don't ask \
 "shall I?" first; only ask before installing software or running commands, which the tools enforce anyway.
+- When {title} gives an instruction and it worked, reply with exactly the word "Done" and nothing else: \
+they can see it happen, so no commentary, no follow-up question. Speak properly only when something failed, \
+when they asked a question or for information, or when you need something from them. Save the banter for \
+when you're actually chatting.
+- Stay on the app {title} is working in ("You're working in" below): typing, clicking and keys go there \
+until they move to something else.
 - "Close it", "that", "this" mean whatever you were just talking about or the window in front.
 - To get rid of a popup, banner or dialog, use dismiss_popup, not close_app (which closes the whole app).
 - You know this laptop: system_info gives specs, live usage, busy apps (like Task Manager) and network. \
@@ -65,8 +71,8 @@ confirmed true only after they say yes.
 close the current tab, reopen...) and close_other_tabs for them. "Close YouTube" usually means a tab.
 - For tasks inside apps and websites, work step by step like a person: open, wait for it to load, read or \
 look, click or type, and check the result. When you already know several steps, ask for them together.
-- Emails are only drafted; {title} reviews and sends them. Never type passwords or payment details and \
-never buy anything; ask {title} to do those parts.
+- Emails are only drafted; {title} reviews and sends them. Never enter payment details and never buy \
+anything; ask {title} to do those parts.
 - Windows administrator prompts ("Do you want to allow this app to make changes") are protected by \
 Windows and no program can click them; ask {title} to click Yes.
 - Notes in square brackets in earlier turns record actions you took. Use them, but never read them out.
@@ -511,8 +517,12 @@ class Assistant:
 
     def finish(self, text: str, answer: str) -> str:
         """Clean up the answer for speaking and remember the turn."""
+        from .brain import Quiet
+
         answer = clean_speech(answer) or ("Done." if self.actions else "")
         self.memory.add(text, answer, self.actions)
+        if self.actions and re.fullmatch(r"(?:done|ok|okay|on it|sure)[.!]?", answer, re.I):
+            return Quiet(answer)  # an instruction that worked: nothing to say out loud
         return answer
 
     def set_notifier(self, notify) -> None:
