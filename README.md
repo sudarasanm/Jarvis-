@@ -66,7 +66,8 @@ To update later: `git pull`, then run the installer again.
 | "send a WhatsApp message to Amma saying I'll be late" / "open the chat with Ravi" | opens the chat and types it; **sends only after your yes** |
 | "open the first pinned contact" / "open the last chat" / "send a message to the first chat saying …" / "send … to this chat" | WhatsApp chats by position, or the one that's open |
 | "type hello world" / "type fourteen twenty six" / "type s u d a r s a n" | type into the app you're using: numbers as digits, spelled letters joined, "… at the rate gmail dot com" as an email |
-| "remember my email is …" / "type my email" / "what's my phone number" / "forget my address" | remember your email, phone, name, address and username on this computer and type them for you |
+| "type my email" / "type my phone number" / "what's my email" | types details you saved with `python -m jarvis --details` (typed at the keyboard, so they're exact: speech recognition garbles email addresses) or by voice with "remember my email is …" |
+| "give me account name as Darshan Shiva" / a bare "1400" right after typing | fills that field; carries on typing what you were spelling |
 | "password is …" | type a password into the focused field: never saved, never sent to the AI, hidden in the log |
 | "type X in the username field" / "sign in" / "submit" / "allow" | fill in forms and press their buttons |
 | "press enter" / "press control t" / "press alt tab" | press keys |

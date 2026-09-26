@@ -538,14 +538,41 @@ def _json_objects(text: str):
         i = start + 1 if depth else j + 1
 
 
+FUNCTION_CALL = re.compile(r"\b([A-Za-z][A-Za-z_]{2,})\s*\(([^()]*)\)")
+
+
+def _tool_key(name: str) -> str:
+    return re.sub(r"[^a-z]", "", name.lower())
+
+
+def _written_call(match) -> tuple[str, dict] | None:
+    """'Typetext(Darshan Shiva)' / 'open_app(name="steam")' -> ('type_text', {'text': 'Darshan Shiva'})."""
+    tool = {_tool_key(t["name"]): t for t in TOOLS}.get(_tool_key(match.group(1)))
+    if tool is None:
+        return None
+    raw = match.group(2).strip()
+    pairs = [p for p in re.split(r",\s*(?=\w+\s*[=:])", raw) if p.strip()]
+    if pairs and all(re.match(r"^\s*\w+\s*[=:]", p) for p in pairs):
+        args = {}
+        for p in pairs:
+            key, value = re.split(r"\s*[=:]\s*", p.strip(), maxsplit=1)
+            args[key] = value.strip().strip("'\"")
+        return tool["name"], args
+    params = tool["input_schema"].get("required") or list(tool["input_schema"].get("properties", {}))
+    return tool["name"], ({params[0]: raw.strip("'\"")} if params and raw else {})
+
+
 def text_tool_calls(text: str) -> list[tuple[str, dict]]:
-    """Small local models sometimes write a tool call as JSON text instead of calling it. Recover those."""
+    """Small local models sometimes write a tool call as text instead of calling it, as JSON
+    ({"name": "close_app", ...}) or like a function (Typetext(Darshan Shiva)). Recover those."""
     names = {t["name"] for t in TOOLS}
     calls = []
     for _, _, obj in _json_objects(text or ""):
         if isinstance(obj, dict) and obj.get("name") in names:
             args = obj.get("parameters", obj.get("arguments", {}))
             calls.append((obj["name"], args if isinstance(args, dict) else {}))
+    if not calls:
+        calls = [c for c in (_written_call(m) for m in FUNCTION_CALL.finditer(text or "")) if c]
     return calls
 
 
@@ -554,6 +581,7 @@ def clean_speech(text: str) -> str:
     text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
     for start, end, obj in sorted(_json_objects(text), reverse=True):
         text = text[:start] + " " + text[end:]
+    text = FUNCTION_CALL.sub(lambda m: " " if _written_call(m) else m.group(0), text)
     text = re.sub(r"\[Actions?:[^\]]*\]", " ", text)
     text = re.sub(r"https?://\S+", "the link", text)
     text = re.sub(r"[*_#`>]+", "", text)
@@ -726,9 +754,9 @@ class Assistant:
                 return messaging.open_whatsapp_chat_at(int(args["position"]))
             return messaging.open_whatsapp_chat(args.get("contact") or "")
         if name == "type_my_detail":
-            from .config import profile
+            from .skills.private import saved_detail
 
-            value = profile().get(args["field"])
+            value = saved_detail(args["field"])
             if not value:
                 return f"No {args['field']} saved. Ask {self.config.user_title} to say: remember my {args['field']} is ..."
             computer.type_text(value)

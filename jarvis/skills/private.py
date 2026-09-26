@@ -78,6 +78,15 @@ def cards(m, brain):
                     "saved card at checkout, or add it there once yourself.")
 
 
+def saved_detail(field: str) -> str | None:
+    value = profile().get(field)
+    if not value and field == "email":
+        from ..config import load_settings
+
+        value = load_settings().get("email_account")  # the Gmail set up with --setup-email
+    return value
+
+
 # --- remembered details ---------------------------------------------------------------------------
 
 @skill(rf"^(?:please\s+)?(?:remember|save|note|store)\s+(?:that\s+)?my\s+(?P<field>{FIELD_WORDS})\s+(?:is|as)\s+(?P<value>.+)$",
@@ -119,10 +128,10 @@ def remember(m, brain):
        r"(?:\s+(?:in|into|on)\s+(?:the\s+)?(?P<target>.+?)(?:\s+(?:field|box|bar))?)?$")
 def type_detail(m, brain):
     field = field_of(m["field"])
-    value = profile().get(field)
+    value = saved_detail(field)
     if not value:
-        return Response(f"I don't know your {SPOKEN[field]} yet. Say: remember my {SPOKEN[field]} is, and then "
-                        "say or spell it.")
+        return Response(f"I don't know your {SPOKEN[field]} yet. The surest way: in PowerShell run "
+                        "python -m jarvis --details and type it in.")
     if m["target"]:
         result = screen.click(m["target"], locate=lambda t: vision.locate(t, brain.config))
         if result.startswith("I couldn't"):
@@ -149,6 +158,12 @@ def forget_detail(m, brain):
 
 
 # --- forms ----------------------------------------------------------------------------------------
+
+@skill(r"^(?:please\s+)?(?:give|put|set|enter|use|fill in|make)\s+(?:me\s+|in\s+)?(?:the\s+|my\s+)?"
+       r"(?P<field>account name|user ?name|user id|login|log in|email(?: id| address)?|e-mail)\s+(?:as|to|is|with)\s+(?P<text>.+)$")
+def field_as(m, brain):
+    return type_into_field(m, brain)
+
 
 @skill(r"^(?:please\s+)?(?:type|enter|put|fill in|write)\s+(?P<text>.+?)\s+(?:in|into|on)\s+(?:the\s+)?"
        r"(?P<field>[\w\s-]+?)\s+(?:field|box|bar)$")

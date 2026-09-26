@@ -330,10 +330,15 @@ def close_app(name: str, wait: float = 3.0) -> str:
     return f"Closed {name}."
 
 
+last_typed_at = 0.0  # when Jarvis last typed something (for "carry on typing" follow-ups)
+
+
 def type_text(text: str) -> str:
     """Type into the app the user is working in (whichever window has keyboard focus)."""
     import pyautogui
 
+    global last_typed_at
+    last_typed_at = time.time()
     from . import screen
 
     screen.ensure_focus()

@@ -53,6 +53,25 @@ def forget_profile(field: str) -> bool:
     return True
 
 
+DETAIL_FIELDS = [("email", "Email address"), ("phone", "Phone number"), ("name", "Full name"),
+                 ("username", "Username you usually use"), ("address", "Delivery address")]
+
+
+def edit_details_interactive() -> None:
+    """Type your details once (speech recognition garbles email addresses); Jarvis types them for you later."""
+    print("Your details, saved only on this computer. Press Enter to keep what's shown, or type '-' to clear.\n")
+    data = profile()
+    for key, label in DETAIL_FIELDS:
+        current = data.get(key, "")
+        answer = input(f"{label}{f' [{current}]' if current else ''}: ").strip()
+        if answer == "-":
+            data.pop(key, None)
+        elif answer:
+            data[key] = answer
+    save_setting("profile", data)
+    print("\nSaved. Say \"type my email\" (or phone, name, username, address) whenever you need it.")
+
+
 def setting(key: str, default=None):
     env = os.environ.get(f"JARVIS_{key.upper()}")
     if env not in (None, ""):

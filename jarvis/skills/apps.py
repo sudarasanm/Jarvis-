@@ -158,6 +158,17 @@ def close(m, brain):
     return action(result)
 
 
+@skill(r"^(?:\d[\d\s.,]*|(?:[a-z0-9]\s+)+[a-z0-9])$")
+def keep_typing(m, brain):
+    # Right after typing, a bare number or spelled-out letters are more of the same:
+    # "type s u d a r a s" ... "1400" -> sudaras1400
+    import time
+
+    if time.time() - computer.last_typed_at > 30:
+        return None
+    return action(computer.type_text(dictation.prepare(m.string).replace(" ", "")))
+
+
 @skill(r"^(?:type|types|typed|dictate)\s+(?P<text>.+)$")
 def type_(m, brain):
     return action(computer.type_text(dictation.prepare(m["text"])))

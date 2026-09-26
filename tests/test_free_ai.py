@@ -312,3 +312,20 @@ def test_failover_stays_on_the_backup_until_the_background_check_says_so(monkeyp
     gemini.healthy = True
     brain.recheck()                        # background check: it answers again
     assert brain("five") == "Gemini: five"
+
+
+def test_ollama_function_style_call_is_run_not_spoken(monkeypatch):
+    typed = []
+    monkeypatch.setattr(computer, "type_text", lambda text: typed.append(text) or "Done.")
+    post = FakePost({"message": {"role": "assistant", "content": "Typetext(Darshan Shiva)"}},
+                    {"message": {"role": "assistant", "content": "Done"}})
+    o = free_ai.Ollama(Config(), post=post)
+    assert o("give me account name as Darshan Shiva") == "Done"
+    assert typed == ["Darshan Shiva"]
+
+
+def test_written_calls_are_recognised_and_stripped():
+    assert ai.text_tool_calls('open_app(name="steam")') == [("open_app", {"name": "steam"})]
+    assert ai.text_tool_calls("I'll call you (maybe) later") == []
+    assert ai.clean_speech("Typetext(Darshan Shiva)") == ""
+    assert ai.clean_speech("Sure (as always), sir.") == "Sure (as always), sir."

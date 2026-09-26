@@ -173,3 +173,44 @@ def test_everyday_phrases_are_not_hijacked(keyboard, monkeypatch):
     assert asked == ["my phone is ringing", "the password for wifi is on the router"]
     assert b.handle("remember my email is banana").text == "That doesn't sound like an email. Could you say it again?"
     assert keyboard == [] and profile() == {}
+
+
+def test_bare_numbers_right_after_typing_carry_on_typing(monkeypatch):
+    written = []
+    monkeypatch.setitem(sys.modules, "pyautogui", types.SimpleNamespace(write=lambda t, interval=0: written.append(t)))
+    asked = []
+    b = Brain(Config(), fallback=lambda text: asked.append(text) or "Chat.")
+    b.handle("type s u d a r a s")
+    assert b.handle("1400").quiet
+    assert written == ["sudaras", "1400"] and asked == []
+    computer.last_typed_at -= 60          # a while later, a bare number is just conversation
+    b.handle("1400")
+    assert asked == ["1400"]
+
+
+def test_give_me_account_name_as(keyboard, monkeypatch):
+    clicks = []
+    monkeypatch.setattr(screen, "SYSTEM", "Windows")
+    monkeypatch.setattr(screen, "screen_elements", lambda: [screen.Element("Edit", "Account name", 500, 300)])
+    monkeypatch.setattr(screen, "click_point", lambda x, y, *a: clicks.append((x, y)))
+    r = Brain(Config()).handle("give me account name as Darshan Shiva")
+    assert clicks == [(500, 300)] and keyboard == ["DarshanShiva"] and r.quiet
+
+
+def test_details_typed_in_at_the_keyboard(monkeypatch, keyboard):
+    from jarvis import config
+
+    answers = iter(["sudarasansiva1426@gmail.com", "", "Sudarsan M", "", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    config.edit_details_interactive()
+    assert profile() == {"email": "sudarasansiva1426@gmail.com", "name": "Sudarsan M"}
+    Brain(Config()).handle("type my email")
+    assert keyboard == ["sudarasansiva1426@gmail.com"]
+
+
+def test_type_my_email_falls_back_to_the_gmail_account(keyboard):
+    from jarvis.config import save_setting
+
+    save_setting("email_account", "sudarasansiva1426@gmail.com")
+    Brain(Config()).handle("type my email")
+    assert keyboard == ["sudarasansiva1426@gmail.com"]
