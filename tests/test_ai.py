@@ -90,3 +90,51 @@ def test_api_key_from_settings_file(monkeypatch):
     assert ai.make_claude(Config()) is None
     config.save_setting("anthropic_api_key", "sk-from-file")
     assert ai.make_claude(Config()).client.api_key == "sk-from-file"
+
+
+def api_error(cls, status, message):
+    import anthropic
+    import httpx2
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(status, request=request)
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
+    return cls(message, response=response, body=body)
+
+
+class FailingClient(FakeClient):
+    def __init__(self, errors, responses=()):
+        super().__init__(responses)
+        self.errors = list(errors)
+
+    def _create(self, **kwargs):
+        self.requests.append(kwargs)
+        if self.errors:
+            raise self.errors.pop(0)
+        return self.responses.pop(0)
+
+
+def test_out_of_credit_is_explained():
+    import anthropic
+
+    client = FailingClient([api_error(anthropic.BadRequestError, 400,
+                                      "Your credit balance is too low to access the Anthropic API.")])
+    assert "out of credit" in ai.Claude(Config(), client=client)("hello")
+
+
+def test_unsupported_optional_features_are_dropped_and_retried():
+    import anthropic
+
+    client = FailingClient([api_error(anthropic.BadRequestError, 400, "fallbacks: Extra inputs are not permitted")],
+                           [reply("end_turn", block("text", text="Hello, sir."))])
+    claude = ai.Claude(Config(), client=client)
+    assert claude("hello") == "Hello, sir."
+    assert "fallbacks" in client.requests[0] and "fallbacks" not in client.requests[1]
+    assert "output_config" not in client.requests[1]
+
+
+def test_other_errors_say_what_went_wrong():
+    import anthropic
+
+    client = FailingClient([api_error(anthropic.BadRequestError, 400, "messages: text content blocks must be non-empty")])
+    assert "must be non-empty" in ai.Claude(Config(), client=client)("hello")

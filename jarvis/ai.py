@@ -130,6 +130,12 @@ class Claude:
         self.client = client or (anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic())
         self.config = config
         self.turns: list[list[dict]] = []  # each turn: user message, then assistant/tool messages
+        # Optional request features. Dropped automatically if the account or model rejects them.
+        self._extras = {
+            "output_config": {"effort": "low"},
+            "betas": ["server-side-fallback-2026-07-01"],
+            "fallbacks": "default",
+        }
 
     @property
     def configured(self) -> bool:
@@ -155,16 +161,7 @@ class Claude:
         turn: list[dict] = [{"role": "user", "content": text}]
         try:
             for _ in range(MAX_TOOL_ROUNDS):
-                response = self.client.beta.messages.create(
-                    model=self.config.claude_model,
-                    max_tokens=4096,
-                    system=self._system(),
-                    tools=TOOLS,
-                    messages=history + turn,
-                    output_config={"effort": "low"},
-                    betas=["server-side-fallback-2026-07-01"],
-                    fallbacks="default",
-                )
+                response = self._create(history + turn)
                 if response.stop_reason == "refusal":
                     return "I'm afraid I can't help with that one."
                 turn.append({"role": "assistant", "content": response.content})
@@ -178,14 +175,35 @@ class Claude:
             return "My connection to Claude isn't authorised. Please check the API key."
         except self._anthropic.RateLimitError:
             return "I'm being rate limited at the moment. Give me a few seconds."
+        except self._anthropic.NotFoundError as e:
+            print(f"(Claude error: {error_message(e)})")
+            return f"The model {self.config.claude_model} isn't available on your account. Try another claude_model."
         except self._anthropic.APIStatusError as e:
-            return f"Claude returned an error, status {e.status_code}."
+            message = error_message(e)
+            print(f"(Claude error {e.status_code}: {message})")
+            if "credit balance" in message.lower():
+                return ("Your Anthropic account is out of credit. Add some at platform dot claude dot com, "
+                        "under Billing, and I'll be right with you.")
+            return f"Claude rejected that request. It said: {message}"
         except self._anthropic.APIConnectionError:
             return "I can't reach my language servers right now. Check the internet connection."
 
         self.turns = (self.turns + [turn])[-MAX_HISTORY_TURNS:]
         answer = " ".join(b.text for b in response.content if b.type == "text").strip()
         return answer or "Done."
+
+    def _create(self, messages: list[dict]):
+        request = dict(model=self.config.claude_model, max_tokens=4096, system=self._system(),
+                       tools=TOOLS, messages=messages)
+        try:
+            return self.client.beta.messages.create(**request, **self._extras)
+        except self._anthropic.BadRequestError as e:
+            message = error_message(e).lower()
+            if not self._extras or not any(k in message for k in ("fallback", "beta", "output_config", "effort")):
+                raise
+            print(f"(Claude rejected optional features, retrying without them: {error_message(e)})")
+            self._extras = {}
+            return self.client.beta.messages.create(**request)
 
     def _run_tool(self, block) -> dict:
         args = block.input or {}
@@ -218,6 +236,16 @@ class Claude:
             place, lat, lon = weather.locate(city)
             return weather.describe(place, weather.forecast(lat, lon, self.config.units), self.config.units)
         raise ValueError(f"unknown tool {name}")
+
+
+def error_message(e) -> str:
+    """The human-readable message inside an API error response."""
+    body = getattr(e, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+    return str(getattr(e, "message", e))
 
 
 def make_claude(config: Config) -> Claude | None:
