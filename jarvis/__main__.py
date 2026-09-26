@@ -190,12 +190,24 @@ class Tee:
                 pass
 
 
+def rotate_log(max_bytes: int = 1_000_000, keep: int = 3) -> None:
+    """When the log passes ~1 MB, keep it as .jarvis.log.1 (older ones shift to .2, .3) and start afresh."""
+    if not LOG_FILE.exists() or LOG_FILE.stat().st_size <= max_bytes:
+        return
+    for n in range(keep, 0, -1):
+        older = LOG_FILE.with_name(f"{LOG_FILE.name}.{n}")
+        newer = LOG_FILE.with_name(f"{LOG_FILE.name}.{n - 1}") if n > 1 else LOG_FILE
+        if newer.exists():
+            if older.exists():
+                older.unlink()
+            newer.rename(older)
+
+
 def log_to_file() -> None:
     """Everything Jarvis prints also goes to ~/.jarvis.log (kept under ~1 MB), so `--logs` can show it live
     in another window. With pythonw there's no console, so it only goes to the file."""
     try:
-        if LOG_FILE.exists() and LOG_FILE.stat().st_size > 1_000_000:
-            LOG_FILE.unlink()
+        rotate_log()
         log = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
     except OSError:
         return
@@ -236,6 +248,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--logs", action="store_true", help="show what Jarvis is doing, live (run in a second window)")
     parser.add_argument("--list-mics", action="store_true", help="list microphones (for the mic_index setting)")
     args = parser.parse_args(argv)
+    from .config import load_env_files
+
+    load_env_files()
 
     if args.stop:
         print("Jarvis stopped." if stop_running_instance() else "Jarvis isn't running.")
@@ -272,7 +287,8 @@ def main(argv: list[str] | None = None) -> None:
         config.dry_run = True
     ai = make_brain(config)
     brain = Brain(config, fallback=ai)
-    speaker = Speaker(config.name, mute=args.mute)
+    speaker = Speaker(config.name, mute=args.mute, engine=config.tts_engine, voice=config.tts_voice,
+                      rate=config.tts_rate)
     if ai is None:
         print("(No AI brain set up, so only built-in commands work. For a free one, add a Gemini key "
               "(\"gemini_api_key\" in ~/.jarvis.json) or install Ollama. See the README.)")
@@ -284,7 +300,8 @@ def main(argv: list[str] | None = None) -> None:
         # Right after login the microphone may not be ready yet, so keep trying for a minute in the background.
         for attempt in range(12 if background else 1):
             try:
-                listener = Listener(config.language, config.mic_sensitivity, config.mic_index)
+                listener = Listener(config.language, config.mic_sensitivity, config.mic_index,
+                                    engine=config.stt_engine, whisper_model=config.whisper_model)
                 break
             except Exception as e:
                 print(f"(Microphone unavailable: {e!r})")

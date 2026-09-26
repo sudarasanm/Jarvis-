@@ -2,13 +2,16 @@
 SpeechRecognition>=3.10
 pyaudio>=0.2.13        # on Windows needs Python 3.13 or older (no prebuilt 3.14 package yet)
 pyttsx3>=2.90
+edge-tts>=7.0          # natural neural voice (online; falls back to the Windows voice)
+faster-whisper>=1.0    # offline speech recognition (downloads a ~150 MB model the first time it's used)
 pywin32>=306; sys_platform == "win32"   # Windows speech engine (SAPI)
 
 # Computer control
 pyautogui>=0.9.54      # typing, key presses, Start-menu search
 pyperclip>=1.8         # typing non-English text
 psutil>=5.9            # closing apps, system status
-keyring>=24            # keeps the email app password in Windows Credential Manager
+keyring>=24
+python-dotenv>=1.0     # optional .env file for settings and keys            # keeps the email app password in Windows Credential Manager
 pillow>=10             # screenshots for looking at the screen
 uiautomation>=2.0.18; sys_platform == "win32"   # reading buttons/links in windows, clicking by name
 

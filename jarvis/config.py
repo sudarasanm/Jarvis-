@@ -16,6 +16,17 @@ from pathlib import Path
 SETTINGS_FILE = Path.home() / ".jarvis.json"
 
 
+def load_env_files() -> None:
+    """Settings and keys can also live in a .env file (see .env.example): the project folder's .env, then
+    ~/.jarvis.env. Real environment variables win over both."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(Path.cwd() / ".env", override=False)
+    load_dotenv(Path.home() / ".jarvis.env", override=False)
+
+
 def load_settings() -> dict:
     try:
         return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -110,6 +121,15 @@ class Config:
     # Optional Ollama model that can see images (e.g. "llama3.2-vision"), used for looking at the
     # screen when there's no Gemini key.
     ollama_vision_model: str | None = _setting_field("ollama_vision_model")
+    # Jarvis's voice: "edge" (natural neural voice, online, falls back to Windows) or "windows" (offline).
+    tts_engine: str = _setting_field("tts_engine", "edge")
+    # Neural voice name, e.g. en-GB-RyanNeural (British male), en-GB-SoniaNeural, en-IN-PrabhatNeural, en-US-GuyNeural.
+    tts_voice: str = _setting_field("tts_voice", "en-GB-RyanNeural")
+    tts_rate: str = _setting_field("tts_rate", "+5%")
+    # Hearing: "google" (fast, online), "whisper" (offline, on this laptop) or "auto" (Google, Whisper when offline).
+    stt_engine: str = _setting_field("stt_engine", "auto")
+    # Whisper model: tiny.en (fastest), base.en (good balance), small.en (most accurate, slower).
+    whisper_model: str = _setting_field("whisper_model", "base.en")
     # Speech recognition language, e.g. en-US, en-GB, en-IN (Indian English), ta-IN (Tamil).
     language: str = _setting_field("language", "en-US")
     # How easily quiet speech is picked up: low, normal, high, max.
@@ -133,6 +153,7 @@ class Config:
     def wake_words(self) -> list[str]:
         """The name plus common speech-recognition mishearings of it."""
         words = [self.wake_word]
+        words += ["wake up"]
         if self.wake_word == "jarvis":
             words += ["jervis", "javis", "jarves", "jarvi", "jarvys", "travis", "harvis", "garvis", "charvis", "davis"]
         return words

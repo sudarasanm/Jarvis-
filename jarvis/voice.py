@@ -7,9 +7,104 @@ and without SpeechRecognition/PyAudio the main loop uses typed input.
 from __future__ import annotations
 
 import platform
+import re
 import queue
 import threading
 import time
+
+
+class MciPlayer:
+    """Plays an MP3 through Windows' built-in media control interface (no extra packages), and can be stopped
+    part-way through."""
+
+    def __init__(self):
+        import ctypes
+
+        self._send_raw = ctypes.windll.winmm.mciSendStringW
+        self._buffer = ctypes.create_unicode_buffer(128)
+        self._count = 0
+
+    def _send(self, command: str) -> tuple[int, str]:
+        error = self._send_raw(command, self._buffer, 128, 0)
+        return error, self._buffer.value
+
+    def play(self, path: str, interrupted=None) -> bool:
+        self._count += 1
+        alias = f"jarvis{self._count}"
+        error, _ = self._send(f'open "{path}" type mpegvideo alias {alias}')
+        if error:
+            raise RuntimeError(f"couldn't open audio (MCI error {error})")
+        try:
+            self._send(f"play {alias}")
+            time.sleep(0.05)
+            while True:
+                _, mode = self._send(f"status {alias} mode")
+                if mode != "playing":
+                    return True
+                if interrupted is not None and interrupted():
+                    self._send(f"stop {alias}")
+                    return False
+                time.sleep(0.1)
+        finally:
+            self._send(f"close {alias}")
+
+
+def split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])", text.strip())
+    return [p for p in parts if p.strip()]
+
+
+class NeuralVoice:
+    """Microsoft's natural neural voices (free, online, via edge-tts). Speaks sentence by sentence, preparing
+    the next sentence while the current one plays, so long answers start quickly and "stop" works mid-way."""
+
+    def __init__(self, voice: str = "en-GB-RyanNeural", rate: str = "+0%", player=None):
+        import edge_tts
+
+        self.edge_tts = edge_tts
+        self.voice, self.rate = voice, rate
+        self.player = player or MciPlayer()
+        self._pool = None
+
+    def synthesize(self, text: str) -> str:
+        import os
+        import tempfile
+        import uuid
+
+        path = os.path.join(tempfile.gettempdir(), f"jarvis-{uuid.uuid4().hex}.mp3")
+        self.edge_tts.Communicate(text, self.voice, rate=self.rate, connect_timeout=5,
+                                  receive_timeout=20).save_sync(path)
+        return path
+
+    def say(self, text: str, interrupted=None) -> bool:
+        import concurrent.futures
+        import os
+
+        sentences = split_sentences(text) or [text]
+        if self._pool is None:
+            self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        upcoming = self._pool.submit(self.synthesize, sentences[0])
+        finished = True
+        paths = []
+        try:
+            for i in range(len(sentences)):
+                path = upcoming.result(timeout=30)
+                paths.append(path)
+                if i + 1 < len(sentences):
+                    upcoming = self._pool.submit(self.synthesize, sentences[i + 1])
+                if not self.player.play(path, interrupted):
+                    finished = False
+                    break
+                if interrupted is not None and interrupted():
+                    finished = False
+                    break
+        finally:
+            for path in paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        return finished
 
 
 BRITISH_VOICE_HINTS = ("george", "daniel", "hazel", "en-gb", "english (great britain)", "united kingdom")
@@ -23,12 +118,20 @@ class Speaker:
     Elsewhere it uses pyttsx3.
     """
 
-    def __init__(self, name: str = "Jarvis", mute: bool = False):
+    def __init__(self, name: str = "Jarvis", mute: bool = False, engine: str = "edge",
+                 voice: str = "en-GB-RyanNeural", rate: str = "+0%"):
         self.name = name
         self._speak = None
         self._sapi = None  # the Windows voice, which can speak in the background and be cut off
+        self.neural = None  # the natural online voice, when available
+        self._neural_failures = 0
         if mute:
             return
+        if engine == "edge" and platform.system() == "Windows":
+            try:
+                self.neural = NeuralVoice(voice, rate)
+            except Exception as e:
+                print(f"(natural voice unavailable, using the Windows voice: {e!r})")
         if platform.system() == "Windows":
             self._speak = self._init_sapi()
         if self._speak is None:
@@ -79,6 +182,14 @@ class Speaker:
         """Speak `text`. If `interrupted()` returns True while speaking (the user said "stop"), stop at once.
         Returns False if it was cut off."""
         print(f"{self.name}: {text}")
+        if self.neural is not None:
+            try:
+                return self.neural.say(text, interrupted)
+            except Exception as e:  # offline, service hiccup: the Windows voice takes over
+                self._neural_failures += 1
+                print(f"(natural voice failed, using the Windows voice: {e!r})")
+                if self._neural_failures >= 3:
+                    self.neural = None
         if self._speak is None:
             return True
         try:
@@ -137,6 +248,39 @@ def list_microphones() -> list[str]:
     return sr.Microphone.list_microphone_names()
 
 
+class WhisperEar:
+    """Offline speech recognition on this laptop (faster-whisper). The model (~150 MB for base.en) downloads
+    once, the first time it's used."""
+
+    def __init__(self, model: str = "base.en", language: str = "en-US"):
+        self.model_name = model
+        self.language = (language or "en").split("-")[0].lower()
+        self._model = None
+        self._lock = threading.Lock()
+
+    def load(self):
+        with self._lock:
+            if self._model is None:
+                from faster_whisper import WhisperModel
+
+                print(f"(loading the offline Whisper model {self.model_name}; the first time it downloads)")
+                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+        return self._model
+
+    def preload(self) -> None:
+        threading.Thread(target=self.load, name="whisper load", daemon=True).start()
+
+    def transcribe(self, audio) -> str | None:
+        import numpy as np
+
+        raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
+        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        language = None if self.model_name.endswith(".en") else self.language
+        segments, _info = self.load().transcribe(samples, language=language, beam_size=1)
+        text = " ".join(s.text.strip() for s in segments).strip()
+        return text or None
+
+
 class Listener:
     """Always-on microphone.
 
@@ -146,11 +290,15 @@ class Listener:
     """
 
     def __init__(self, language: str = "en-US", sensitivity: str = "high", device_index: int | None = None,
-                 start: bool = True):
+                 start: bool = True, engine: str = "auto", whisper_model: str = "base.en"):
         import speech_recognition as sr
 
         self.sr = sr
         self.language = language
+        self.engine = engine  # "google", "whisper" or "auto" (Google, Whisper when that fails)
+        self.whisper = WhisperEar(whisper_model, language) if engine in ("whisper", "auto") else None
+        if engine == "whisper" and start:
+            self.whisper.preload()
         self.recognizer = sr.Recognizer()
         self.recognizer.operation_timeout = 8  # never hang waiting for Google's speech service
         self.microphone = sr.Microphone(device_index=device_index)
@@ -230,15 +378,26 @@ class Listener:
         begun = time.time()
         if audio.sample_width == 2:
             audio = self.sr.AudioData(boost_quiet_audio(audio.get_raw_data()), audio.sample_rate, 2)
-        try:
-            text = self.recognizer.recognize_google(audio, language=self.language)
-        except self.sr.UnknownValueError:
-            return None
-        except self.sr.RequestError as e:
-            print(f"(speech service unreachable: {e})")
-            return None
-        except Exception as e:  # timeouts and network trouble: never freeze the loop
-            print(f"(speech recognition failed: {e!r})")
-            return None
-        print(f"(heard {duration:.1f}s of speech, recognised in {time.time() - begun:.1f}s)")
+        text, how = None, "Google"
+        if self.engine == "whisper":
+            text, how = self._whisper(audio), "Whisper"
+        else:
+            try:
+                text = self.recognizer.recognize_google(audio, language=self.language)
+            except self.sr.UnknownValueError:
+                return None  # Google heard no words: nothing to retry
+            except Exception as e:  # offline, timeout, service trouble: never freeze the loop
+                print(f"(Google speech recognition failed: {e!r})")
+                if self.whisper is None:
+                    return None
+                text, how = self._whisper(audio), "Whisper (offline)"
+        if text:
+            print(f"(heard {duration:.1f}s of speech, recognised by {how} in {time.time() - begun:.1f}s)")
         return text
+
+    def _whisper(self, audio) -> str | None:
+        try:
+            return self.whisper.transcribe(audio)
+        except Exception as e:
+            print(f"(offline Whisper recognition failed: {e!r})")
+            return None

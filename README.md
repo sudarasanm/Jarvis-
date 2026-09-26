@@ -110,6 +110,13 @@ Jarvis reads and sends Gmail directly (not by clicking around the website), usin
 
 The app password is stored in Windows Credential Manager, not in a file. You can revoke it any time from the same Google page. Email text you ask Jarvis to summarise goes to the AI brain (Gemini) to be summarised.
 
+## Voice
+
+- **Speaking:** a natural neural voice (Microsoft's free online voices; default `en-GB-RyanNeural`, a British male). It speaks sentence by sentence, so long answers start quickly. If there's no internet it falls back to the Windows voice. Set `tts_voice` to try others (`en-GB-SoniaNeural`, `en-IN-PrabhatNeural`, `en-US-GuyNeural`), or `tts_engine` to `windows` for offline only.
+- **Interrupting:** say **"stop"** (or "be quiet", "enough", "cancel") while Jarvis is talking and it stops at once, like Alexa.
+- **Hearing:** `stt_engine` = `auto` (Google, and offline Whisper when Google can't be reached), `google`, or `whisper` (always offline, on your laptop; slower). The Whisper model (`whisper_model`, default `base.en`, ~150 MB) downloads the first time it's used.
+- **Wake words:** "Jarvis", "Hey Jarvis" or "Wake up".
+
 ## Hearing you better
 
 - **Accent:** set `language` to match how you speak: `en-IN` (Indian English), `en-US`, `en-GB`, or even `ta-IN` / `hi-IN`. This makes a big difference.
@@ -118,7 +125,7 @@ The app password is stored in Windows Credential Manager, not in a file. You can
 
 ## Settings
 
-Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart Jarvis. Environment variables `JARVIS_<NAME>` override the file.
+Edit `%USERPROFILE%\.jarvis.json` (or put `JARVIS_<NAME>=value` lines in a `.env` file in the Jarvis folder; see `.env.example`) (on Mac/Linux `~/.jarvis.json`), then restart Jarvis. Environment variables `JARVIS_<NAME>` override the file.
 
 ```json
 {
