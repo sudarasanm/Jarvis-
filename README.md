@@ -144,6 +144,7 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 .venv\Scripts\python -m jarvis --text     # type instead of talking
 .venv\Scripts\python -m jarvis --no-wake  # answer everything, no "Jarvis" needed
 .venv\Scripts\python -m jarvis --stop     # stop the background copy
+.venv\Scripts\python -m jarvis --logs     # in a second window: watch what Jarvis is doing, live
 ```
 
 The console shows timings for every step, like `(heard 2.1s of speech, recognised in 0.8s)` and `(answered in 3.4s)`, so you can see where any delay comes from. When it runs in the background, everything it hears and does is logged to `%USERPROFILE%\.jarvis.log`. Stop the background copy first (only one Jarvis runs at a time).

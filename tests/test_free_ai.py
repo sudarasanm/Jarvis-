@@ -248,3 +248,11 @@ def test_gemini_thinking_setting_falls_back_per_model():
     assert post.requests[1][1]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
     g("again")
     assert post.requests[2][1]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}  # remembered
+
+
+def test_ollama_gets_compact_tools_room_and_keep_alive():
+    post = FakePost({"message": {"role": "assistant", "content": "Hi."}})
+    free_ai.Ollama(Config(), post=post)("hello")
+    body = post.requests[0][1]
+    assert len(body["tools"]) == len(free_ai.OLLAMA_TOOLS) < len(ai.TOOLS)
+    assert body["options"]["num_ctx"] >= 8192 and body["keep_alive"]

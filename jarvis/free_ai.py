@@ -90,7 +90,7 @@ def _with_thinking(body: dict, option: dict | None) -> dict:
     return {**body, "generationConfig": config}
 
 
-def gemini_generate(config: Config, body: dict, key: str | None = None, post=None) -> dict:
+def gemini_generate(config: Config, body: dict, key: str | None = None, post=None, timeout: float = 40) -> dict:
     """Call Gemini, riding out the free tier's limits: wait out very short limits, rotate to the next
     model (each has its own free quota), and raise GeminiUnavailable when they're all resting."""
     post = post or post_json
@@ -103,8 +103,11 @@ def gemini_generate(config: Config, body: dict, key: str | None = None, post=Non
         while True:
             choice = _thinking_choice.get(model, 0)
             try:
-                return post(GEMINI_URL.format(model=model), _with_thinking(body, THINKING_OPTIONS[choice]),
-                            {"x-goog-api-key": key})
+                began = time.time()
+                reply = post(GEMINI_URL.format(model=model), _with_thinking(body, THINKING_OPTIONS[choice]),
+                             {"x-goog-api-key": key}, timeout=timeout)
+                print(f"(Gemini {model} replied in {time.time() - began:.1f}s)")
+                return reply
             except HTTPError as e:
                 last_error = e
                 if e.status == 400 and "thinking" in e.message.lower() and choice + 1 < len(THINKING_OPTIONS):
@@ -199,6 +202,12 @@ class Gemini(Assistant):
         return self.finish(text, answer) or "Done."
 
 
+# A small model on a laptop CPU chokes on 40 tools: give it the everyday ones.
+OLLAMA_TOOLS = {"open_app", "close_app", "new_tab", "close_tab", "list_tabs", "switch_tab", "tab_action", "switch_window",
+                "type_text", "type_my_detail", "press_keys", "click", "read_screen", "get_weather", "system_info",
+                "set_volume"}
+
+
 class Ollama(Assistant):
     """A model running on this PC with Ollama (https://ollama.com). Free and offline."""
 
@@ -209,7 +218,8 @@ class Ollama(Assistant):
         self.post = post
         self._started = False
         self.tools = [{"type": "function", "function": {
-            "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in TOOLS]
+            "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
+            for t in TOOLS if t["name"] in OLLAMA_TOOLS]
 
     def _turn(self, text: str) -> str | None:
         history = []
@@ -225,7 +235,12 @@ class Ollama(Assistant):
                         "messages": [{"role": "system", "content": self.system()}] + history + turn,
                         "tools": self.tools,
                         "stream": False,
+                        # Room for the instructions and conversation (the default cuts them off), and stay
+                        # loaded between questions instead of reloading from disk each time.
+                        "options": {"num_ctx": 8192},
+                        "keep_alive": "30m",
                     },
+                    timeout=90,
                 )
                 message = data.get("message") or {}
                 turn.append({k: v for k, v in message.items() if k in ("role", "content", "tool_calls")})

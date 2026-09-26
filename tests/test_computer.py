@@ -212,3 +212,21 @@ def test_normalize_drops_filler_words():
     assert computer._normalize("the Microsoft edge Windows") == "microsoft edge"
     assert computer._normalize("my Brave browser") == "brave"
     assert computer._normalize("windows") == "windows"
+
+
+def test_no_website_guessing_when_an_ai_can_decide(monkeypatch, opened):
+    monkeypatch.setattr(computer, "SYSTEM", "Windows")
+    monkeypatch.setattr(computer, "_windows_start", lambda target: False)
+    monkeypatch.setattr(computer, "_installed", {})
+    assert "couldn't find" in computer.open_app("string", guess_sites=False)
+    assert opened == []
+    computer.open_app("string")  # no AI: a one-word name may still be a website
+    assert opened == ["https://www.string.com"]
+
+
+def test_steam_mishearings():
+    from jarvis.brain import fix_transcript
+
+    assert fix_transcript("open string") == "open Steam"
+    assert fix_transcript("click the plus button in the stream") == "click the plus button in Steam"
+    assert fix_transcript("I like to stream on Twitch") == "I like to stream on Twitch"

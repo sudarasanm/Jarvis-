@@ -140,7 +140,7 @@ def _email_to(to: str, topic: str, brain) -> Response:
 def open_(m, brain):
     if _complex(m["name"], brain):
         return ASK_AI
-    result = computer.open_app(m["name"])
+    result = computer.open_app(m["name"], guess_sites=brain.fallback is None)
     if brain.fallback is not None and result.startswith(("I couldn't find", "Sorry, I didn't catch")):
         return ASK_AI  # nothing was opened; the AI can work out what was meant
     return action(result)

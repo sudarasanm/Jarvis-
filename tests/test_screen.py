@@ -338,3 +338,23 @@ def test_tab_voice_commands(browsers):
 
 def test_switch_window_falls_back_to_tab(browsers):
     assert screen.switch_to_window("gmail").startswith("Switched to the Inbox")
+
+
+def test_symbol_buttons_by_spoken_name():
+    els = [screen.Element("Text", "Accounts", 1, 1), screen.Element("Button", "+", 50, 50),
+           screen.Element("Button", "×", 90, 10)]
+    assert screen.find_element("plus", els).name == "+"
+    assert screen.find_element("plus button", els).name == "+"
+    assert screen.find_element("x", els).name == "×"
+    add = [screen.Element("Button", "Add account", 5, 5)]
+    assert screen.find_element("plus", add).name == "Add account"
+
+
+def test_click_says_so_when_it_cannot_look(monkeypatch):
+    monkeypatch.setattr(screen, "SYSTEM", "Linux")
+
+    def locate(target):
+        raise RuntimeError("Gemini's free limit is used up")
+
+    text = screen.click("the plus button", locate=locate)
+    assert "can't look at the screen right now" in text and "free limit" in text

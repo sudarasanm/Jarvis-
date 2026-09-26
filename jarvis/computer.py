@@ -39,6 +39,12 @@ WEBSITES = {
     "chatgpt": "https://chatgpt.com",
     "claude": "https://claude.ai",
     "whatsapp web": "https://web.whatsapp.com",
+    "amazon": "https://www.amazon.in", "flipkart": "https://www.flipkart.com", "myntra": "https://www.myntra.com",
+    "zomato": "https://www.zomato.com", "swiggy": "https://www.swiggy.com", "twitch": "https://www.twitch.tv",
+    "stack overflow": "https://stackoverflow.com", "epic games store": "https://store.epicgames.com",
+    "steam store": "https://store.steampowered.com", "google drive": "https://drive.google.com",
+    "drive": "https://drive.google.com", "google docs": "https://docs.google.com", "gemini": "https://gemini.google.com",
+    "ai studio": "https://aistudio.google.com", "outlook web": "https://outlook.live.com", "linkedin jobs": "https://www.linkedin.com/jobs",
     "spotify web": "https://open.spotify.com",
 }
 
@@ -57,6 +63,8 @@ WINDOWS_APPS = {
     "settings": "ms-settings:", "task manager": "taskmgr", "control panel": "control",
     "spotify": "spotify:", "whatsapp": "whatsapp:", "camera": "microsoft.windows.camera:",
     "store": "ms-windows-store:", "microsoft store": "ms-windows-store:", "snipping tool": "snippingtool",
+    "steam": "steam:", "epic": "com.epicgames.launcher:", "epic games": "com.epicgames.launcher:",
+    "epic games launcher": "com.epicgames.launcher:", "discord": "discord:",
 }
 
 MAC_APPS = {
@@ -185,8 +193,11 @@ def url_for(name: str) -> str:
     return "https://www.google.com/search?q=" + urllib.parse.quote_plus(name)
 
 
-def open_app(name: str, settle: float = 1.5) -> str:
-    """Open an app or website by its spoken name. Never guesses wildly: says so if it can't find it."""
+def open_app(name: str, settle: float = 1.5, guess_sites: bool = True) -> str:
+    """Open an app or website by its spoken name. Never guesses wildly: says so if it can't find it.
+
+    guess_sites: for an unknown single word, try www.<word>.com. Off when an AI can work out what was meant
+    instead ("open string" was really "open Steam", not string.com)."""
     import difflib
 
     key = _normalize(name)
@@ -223,8 +234,8 @@ def open_app(name: str, settle: float = 1.5) -> str:
         known = list(WEBSITES) + list(WINDOWS_APPS)
         close = difflib.get_close_matches(key, known, n=1, cutoff=0.8)
         if close and close[0] != key:
-            return open_app(close[0], settle)
-        if " " not in key and key.isalpha():
+            return open_app(close[0], settle, guess_sites)
+        if guess_sites and " " not in key and key.isalpha():
             return open_website(key)
         return f"I couldn't find an app or website called {name}."
     time.sleep(settle)  # give the window a moment so typing afterwards lands in it

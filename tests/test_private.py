@@ -110,10 +110,10 @@ def test_sign_in_falls_back_to_enter(monkeypatch):
 
 
 def test_quick_actions_are_quiet_but_failures_speak(monkeypatch):
-    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5: f"Opening {name}.")
+    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5, **kw: f"Opening {name}.")
     b = Brain(Config())
     assert b.handle("open steam").quiet
-    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5: f"I couldn't find an app or website called {name}.")
+    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5, **kw: f"I couldn't find an app or website called {name}.")
     assert not b.handle("open blorp").quiet
     assert not b.handle("what time is it").quiet
 

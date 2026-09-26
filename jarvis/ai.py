@@ -569,6 +569,7 @@ class Assistant:
             result, is_error = self._dispatch(name, args or {}), False
         except Exception as e:
             result, is_error = f"Error: {e}", True
+        print(f"(  -> {str(result)[:160]})")
         summary = ", ".join(f"{v}" for v in (args or {}).values() if v not in (None, "", False))
         self.actions.append(f"{name}({summary[:60]}) -> {str(result)[:100]}")
         return result, is_error
@@ -809,6 +810,7 @@ class Failover:
         for brain in self.brains:
             if not brain.available:
                 continue
+            print(f"(asking {brain.label}...)")
             answer = getattr(brain, method)(*args)
             if brain.available:
                 return answer

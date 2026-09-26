@@ -226,3 +226,23 @@ def test_listener_drops_its_own_voice_and_keeps_speech_captured_while_busy():
     listener._offer(audio, ended=1002.0)       # the user, after Jarvis finished
     listener._offer(audio, ended=1004.0)       # and more while Jarvis was busy thinking
     assert listener.phrases.qsize() == 2
+
+
+def test_slow_answers_get_a_one_moment(monkeypatch):
+    import time as real_time
+
+    def slow(text):
+        real_time.sleep(0.3)
+        return "Here you go."
+
+    import threading
+
+    from jarvis import __main__ as main
+
+    class FastTimer(threading.Timer):
+        def __init__(self, interval, fn):
+            super().__init__(0.05, fn)
+
+    monkeypatch.setattr(main.threading, "Timer", FastTimer)
+    said = run_voice(Brain(Config(), fallback=slow), ["jarvis what's the meaning of life"])
+    assert said == ["One moment.", "Here you go."]

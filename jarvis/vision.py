@@ -36,7 +36,7 @@ def _gemini(config: Config, prompt: str, image: bytes, json_reply: bool = False)
     if json_reply:
         body["generationConfig"] = {"responseMimeType": "application/json"}
     try:
-        data = gemini_generate(config, body)
+        data = gemini_generate(config, body, timeout=25)  # a stuck screenshot upload must not freeze Jarvis
     except GeminiUnavailable as e:
         raise VisionUnavailable("I can't see the screen right now: Gemini's free limit is used up "
                                 f"for about {e.seconds:.0f} seconds.") from None

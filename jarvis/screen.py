@@ -267,8 +267,33 @@ def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", "", text.lower()).strip()
 
 
+# Spoken words for buttons that are just symbols.
+SYMBOLS = {"plus": ["+", "add", "new"], "add": ["+"], "minus": ["-", "\u2212", "remove"], "x": ["\u00d7", "\u2715", "close"],
+           "cross": ["\u00d7", "\u2715", "close"], "back": ["\u2190", "back"], "forward": ["\u2192"],
+           "settings": ["\u2699", "settings"], "menu": ["\u2630", "\u22ee", "\u22ef", "more"],
+           "three dots": ["\u22ee", "\u22ef", "more"], "search": ["\U0001f50d", "search"]}
+
+
 def find_element(target: str, elements: list[Element]) -> Element | None:
-    """Best match by name: exact, then starts-with, then contains. Clickable things win ties."""
+    """Best match by name: exact, then starts-with, then contains. Clickable things win ties.
+    "plus" also finds a button named "+" (or "Add account"), "x" finds "×", and so on."""
+    target = re.sub(r"\s+(?:button|icon|sign|symbol)$", "", target.strip(), flags=re.I)
+    for alternative in SYMBOLS.get(target.lower(), []):
+        exact = [e for e in elements if e.name.strip().lower() == alternative.lower() and e.kind in INTERACTIVE]
+        if exact:
+            return exact[0]
+    found = _match_name(target, elements)
+    if found is not None:
+        return found
+    for alternative in SYMBOLS.get(target.lower(), []):  # "plus" -> a button called "Add account"
+        starts = [e for e in elements if _norm(alternative) and _norm(e.name).startswith(_norm(alternative))
+                  and e.kind in INTERACTIVE]
+        if starts:
+            return starts[0]
+    return None
+
+
+def _match_name(target: str, elements: list[Element]) -> Element | None:
     wanted = _norm(target)
     if not wanted:
         return None
@@ -304,7 +329,10 @@ def click(target: str, double: bool = False, right: bool = False, locate=None) -
         click_point(element.x, element.y, double, right)
         return f"{what} {element.kind.lower()} '{element.name}'."
     if locate is not None:
-        point = locate(target)
+        try:
+            point = locate(target)
+        except Exception as e:  # e.g. Gemini's free limit: say so rather than hang or crash
+            return f"I couldn't find {target} by name, and I can't look at the screen right now ({e})."
         if point is not None:
             click_point(point[0], point[1], double, right)
             return f"{what} what looked like {target}."
@@ -345,8 +373,11 @@ def dismiss_popup(locate=None) -> str:
                     click_point(e.x, e.y)
                     return f"Dismissed it with '{e.name}'."
     if locate is not None:
-        point = locate("the button that closes or dismisses the popup, dialog or banner (an X, Close, "
-                       "Not now or No thanks), not the window's own close button")
+        try:
+            point = locate("the button that closes or dismisses the popup, dialog or banner (an X, Close, "
+                           "Not now or No thanks), not the window's own close button")
+        except Exception:
+            point = None
         if point is not None:
             click_point(*point)
             return "Closed the popup."

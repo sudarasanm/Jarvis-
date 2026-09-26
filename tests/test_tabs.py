@@ -137,7 +137,7 @@ def desk(monkeypatch):
     monkeypatch.setattr(computer.time, "sleep", lambda s: None)
     monkeypatch.setattr(computer, "_running", lambda names: [])
 
-    def open_app(name, settle=1.5):
+    def open_app(name, settle=1.5, **kw):
         d.open({"microsoft edge": "edge", "chrome": "chrome", "brave": "brave"}[name])
         return f"Opening {name}."
 
@@ -199,7 +199,7 @@ def test_new_windows(desk):
 
 
 def test_failed_quick_command_goes_to_the_ai(desk, monkeypatch):
-    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5: f"I couldn't find an app or website called {name}.")
+    monkeypatch.setattr(computer, "open_app", lambda name, settle=1.5, **kw: f"I couldn't find an app or website called {name}.")
     asked = []
     b = Brain(Config(), fallback=lambda text: asked.append(text) or "Done it another way.")
     assert b.handle("open the blue thing").text == "Done it another way."

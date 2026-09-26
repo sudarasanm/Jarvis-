@@ -64,7 +64,15 @@ def voice_loop(brain: Brain, speaker: Speaker, listener: Listener, always_awake:
             in_conversation = True
             last_activity = time.time()
             continue
-        response = brain.handle(command)
+        # Anything slower than a few seconds (a slow AI, a big screen to read) gets a "One moment" so it
+        # never seems stuck.
+        holding = threading.Timer(4.0, lambda: say("One moment."))
+        holding.daemon = True
+        holding.start()
+        try:
+            response = brain.handle(command)
+        finally:
+            holding.cancel()
         print(f"(answered in {time.time() - begun:.1f}s)")
         if response.quiet and brain.config.quiet_actions:
             print(f"(done: {response.text})")
@@ -141,15 +149,60 @@ def stop_running_instance() -> bool:
         return False
 
 
-def redirect_output_to_log() -> None:
-    """pythonw has no console; send output to ~/.jarvis.log instead (kept under ~1 MB)."""
+class Tee:
+    """Write to the console and the log file at once."""
+
+    def __init__(self, *streams):
+        self.streams = [s for s in streams if s is not None]
+
+    def write(self, text):
+        for s in self.streams:
+            try:
+                s.write(text)
+                s.flush()
+            except Exception:
+                pass
+        return len(text)
+
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+
+def log_to_file() -> None:
+    """Everything Jarvis prints also goes to ~/.jarvis.log (kept under ~1 MB), so `--logs` can show it live
+    in another window. With pythonw there's no console, so it only goes to the file."""
     try:
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > 1_000_000:
             LOG_FILE.unlink()
         log = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
     except OSError:
         return
-    sys.stdout = sys.stderr = log
+    log.write(f"\n===== Jarvis started {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+    sys.stdout = Tee(sys.stdout, log)
+    sys.stderr = Tee(sys.stderr, log)
+
+
+def follow_log() -> None:
+    """Show the log live, like a second window into what Jarvis is doing."""
+    print(f"Showing {LOG_FILE} live. Ctrl+C to stop.\n")
+    try:
+        with open(LOG_FILE, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+            print("".join(lines[-40:]), end="")
+            while True:
+                line = f.readline()
+                if line:
+                    print(line, end="", flush=True)
+                else:
+                    time.sleep(0.3)
+    except FileNotFoundError:
+        print("No log yet: start Jarvis first.")
+    except KeyboardInterrupt:
+        pass
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -160,11 +213,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dry-run", action="store_true", help="don't actually shut down / restart / sleep")
     parser.add_argument("--background", action="store_true", help="log to ~/.jarvis.log instead of the console")
     parser.add_argument("--stop", action="store_true", help="stop a Jarvis running in the background")
+    parser.add_argument("--logs", action="store_true", help="show what Jarvis is doing, live (run in a second window)")
     parser.add_argument("--list-mics", action="store_true", help="list microphones (for the mic_index setting)")
     args = parser.parse_args(argv)
 
     if args.stop:
         print("Jarvis stopped." if stop_running_instance() else "Jarvis isn't running.")
+        return
+    if args.logs:
+        follow_log()
         return
     if args.list_mics:
         for i, mic in enumerate(list_microphones()):
@@ -173,8 +230,7 @@ def main(argv: list[str] | None = None) -> None:
 
     make_dpi_aware()
     background = args.background or sys.stdout is None  # pythonw.exe has no stdout
-    if background:
-        redirect_output_to_log()
+    log_to_file()
 
     lock = claim_single_instance()
     if lock is None:
