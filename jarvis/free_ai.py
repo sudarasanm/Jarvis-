@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import urllib.error
 import urllib.request
 
-from .ai import MAX_TOOL_ROUNDS, TOOLS, Assistant
+from .ai import MAX_TOOL_ROUNDS, TOOLS, Assistant, text_tool_calls
 from .config import Config, load_settings
 
 
@@ -47,11 +49,69 @@ TOO_MANY_STEPS = "That took more steps than I expected, so I stopped. Shall we t
 OFFLINE = "I can't reach my language servers right now. Check the internet connection."
 
 
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+# model -> time.time() when it may be used again. Shared by chat and screen-reading (vision.py),
+# because they draw on the same free quota.
+_gemini_resting: dict[str, float] = {}
+
+
+class GeminiUnavailable(Exception):
+    def __init__(self, seconds: float):
+        super().__init__(f"all Gemini models are resting for {seconds:.0f}s")
+        self.seconds = seconds
+
+
+def retry_delay(message: str) -> float | None:
+    """'Please retry in 426.6ms.' -> 0.43; 'retry in 40.05s' -> 40.05."""
+    m = re.search(r"retry in ([\d.]+)\s*(ms|s)\b", message or "", re.I)
+    if not m:
+        return None
+    value = float(m.group(1))
+    return value / 1000 if m.group(2).lower() == "ms" else value
+
+
+def gemini_models(config: Config) -> list[str]:
+    models = [config.gemini_model] + [m.strip() for m in str(config.gemini_backup_models or "").split(",")]
+    return list(dict.fromkeys(m for m in models if m))
+
+
+def gemini_generate(config: Config, body: dict, key: str | None = None, post=None) -> dict:
+    """Call Gemini, riding out the free tier's limits: wait out very short limits, rotate to the next
+    model (each has its own free quota), and raise GeminiUnavailable when they're all resting."""
+    post = post or post_json
+    key = key or gemini_key()
+    last_error = None
+    for model in gemini_models(config):
+        if time.time() < _gemini_resting.get(model, 0):
+            continue
+        for attempt in range(2):
+            try:
+                return post(GEMINI_URL.format(model=model), body, {"x-goog-api-key": key})
+            except HTTPError as e:
+                last_error = e
+                if e.status == 429:
+                    delay = retry_delay(e.message)
+                    if attempt == 0 and delay is not None and delay <= 5:
+                        time.sleep(delay + 0.3)
+                        continue
+                    rest = max(delay or 60, 10)
+                    _gemini_resting[model] = time.time() + rest
+                    print(f"(Gemini {model}: free limit reached, resting {rest:.0f}s)")
+                    break
+                if e.status == 404 and model != config.gemini_model:
+                    _gemini_resting[model] = time.time() + 3600  # backup model doesn't exist
+                    break
+                raise
+    waits = [t - time.time() for t in _gemini_resting.values()]
+    raise GeminiUnavailable(max(min(waits) if waits else 60, 5)) from last_error
+
+
 class Gemini(Assistant):
     """Google Gemini. Free tier: get a key at https://aistudio.google.com/apikey (no card needed)."""
 
     label = "Gemini"
-    URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    URL = GEMINI_URL
 
     def __init__(self, config: Config, api_key: str, post=post_json):
         super().__init__(config)
@@ -66,18 +126,17 @@ class Gemini(Assistant):
         self.tools = [{"functionDeclarations": declarations}]
 
     def _turn(self, text: str) -> str | None:
+        history = []
+        for user, reply in self.past_turns():
+            history += [{"role": "user", "parts": [{"text": user}]}, {"role": "model", "parts": [{"text": reply}]}]
         turn = [{"role": "user", "parts": [{"text": text}]}]
         try:
             for _ in range(MAX_TOOL_ROUNDS):
-                data = self.post(
-                    self.URL.format(model=self.config.gemini_model),
-                    {
-                        "systemInstruction": {"parts": [{"text": self.system()}]},
-                        "contents": self.history() + turn,
-                        "tools": self.tools,
-                    },
-                    {"x-goog-api-key": self.api_key},
-                )
+                data = gemini_generate(self.config, {
+                    "systemInstruction": {"parts": [{"text": self.system()}]},
+                    "contents": history + turn,
+                    "tools": self.tools,
+                }, self.api_key, self.post)
                 candidates = data.get("candidates") or []
                 content = candidates[0].get("content") if candidates else None
                 if not content or not content.get("parts"):
@@ -97,11 +156,11 @@ class Gemini(Assistant):
                 turn.append({"role": "user", "parts": responses})
             else:
                 return TOO_MANY_STEPS
+        except GeminiUnavailable as e:
+            self.pause(e.seconds, "free limit reached on every Gemini model")
+            return "I've hit Gemini's free limit for the moment. Give me a minute."
         except HTTPError as e:
             print(f"(Gemini error {e.status}: {e.message})")
-            if e.status == 429:
-                self.pause(60, "free quota used up for the moment")
-                return "I've hit Gemini's free limit for the moment. Give me a minute."
             if e.status in (400, 401, 403) and "key" in e.message.lower():
                 self.pause(3600, "API key not accepted")
                 return "Gemini didn't accept the API key. Please check it."
@@ -115,9 +174,8 @@ class Gemini(Assistant):
             self.pause(30, "can't reach Gemini")
             return OFFLINE
 
-        self.remember(turn)
-        answer = " ".join(p["text"] for p in content["parts"] if p.get("text") and not p.get("thought")).strip()
-        return answer or "Done."
+        answer = " ".join(p["text"] for p in content["parts"] if p.get("text") and not p.get("thought"))
+        return self.finish(text, answer) or "Done."
 
 
 class Ollama(Assistant):
@@ -133,6 +191,9 @@ class Ollama(Assistant):
             "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in TOOLS]
 
     def _turn(self, text: str) -> str | None:
+        history = []
+        for user, reply in self.past_turns():
+            history += [{"role": "user", "content": user}, {"role": "assistant", "content": reply}]
         turn = [{"role": "user", "content": text}]
         try:
             for _ in range(MAX_TOOL_ROUNDS):
@@ -140,23 +201,28 @@ class Ollama(Assistant):
                     f"{self.config.ollama_url}/api/chat",
                     {
                         "model": self.config.ollama_model,
-                        "messages": [{"role": "system", "content": self.system()}] + self.history() + turn,
+                        "messages": [{"role": "system", "content": self.system()}] + history + turn,
                         "tools": self.tools,
                         "stream": False,
                     },
                 )
                 message = data.get("message") or {}
                 turn.append({k: v for k, v in message.items() if k in ("role", "content", "tool_calls")})
-                calls = message.get("tool_calls") or []
-                if not calls:
-                    break
-                for call in calls:
+                calls = []
+                for call in message.get("tool_calls") or []:
                     fn = call.get("function", {})
                     args = fn.get("arguments") or {}
                     if isinstance(args, str):
                         args = json.loads(args or "{}")
-                    result, _ = self.run_tool(fn.get("name", ""), args)
-                    turn.append({"role": "tool", "tool_name": fn.get("name", ""), "content": result})
+                    calls.append((fn.get("name", ""), args))
+                if not calls:
+                    # Small models sometimes write the call as JSON text; run it rather than read it out.
+                    calls = text_tool_calls(message.get("content", ""))
+                if not calls:
+                    break
+                for name, args in calls:
+                    result, _ = self.run_tool(name, args)
+                    turn.append({"role": "tool", "tool_name": name, "content": result})
             else:
                 return TOO_MANY_STEPS
         except HTTPError as e:
@@ -171,8 +237,7 @@ class Ollama(Assistant):
             self.pause(60, "Ollama isn't running")
             return "I can't reach Ollama. Is it running?"
 
-        self.remember(turn)
-        return (message.get("content") or "").strip() or "Done."
+        return self.finish(text, message.get("content") or "") or "Done."
 
 
 def gemini_key() -> str | None:

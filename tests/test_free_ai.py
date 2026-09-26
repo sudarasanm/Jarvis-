@@ -47,11 +47,33 @@ def test_gemini_tool_loop(monkeypatch):
         "name": "open_app", "response": {"result": "Opening brave."}}
 
 
-def test_gemini_quota_pauses_it():
-    post = FakePost(free_ai.HTTPError(429, "Resource has been exhausted"))
+def test_gemini_quota_pauses_it_after_trying_every_model():
+    post = FakePost(free_ai.HTTPError(429, "Quota exceeded. Please retry in 40.05s."),
+                    free_ai.HTTPError(429, "Quota exceeded. Please retry in 20s."))
     g = free_ai.Gemini(Config(), "k", post=post)
     assert "free limit" in g("hello")
     assert not g.available
+    assert [u.split("/models/")[1] for u, _, _ in post.requests] == [
+        "gemini-flash-latest:generateContent", "gemini-flash-lite-latest:generateContent"]
+    assert 15 < g.unavailable_until - __import__("time").time() <= 20  # back when the first model is
+
+
+def test_gemini_waits_out_a_tiny_limit_then_switches_model_for_a_long_one(monkeypatch):
+    slept = []
+    monkeypatch.setattr(free_ai.time, "sleep", slept.append)
+    post = FakePost(free_ai.HTTPError(429, "Please retry in 426.6ms."), gemini_reply({"text": "Hi."}),
+                    free_ai.HTTPError(429, "Please retry in 57s."), gemini_reply({"text": "Still here."}))
+    g = free_ai.Gemini(Config(), "k", post=post)
+    assert g("hello") == "Hi."
+    assert slept and slept[0] < 1  # waited under a second and retried the same model
+    assert g("again") == "Still here."
+    assert post.requests[-1][0].endswith("gemini-flash-lite-latest:generateContent")
+
+
+def test_retry_delay_parsing():
+    assert free_ai.retry_delay("Please retry in 426.618514ms.") == pytest.approx(0.4266, abs=1e-3)
+    assert free_ai.retry_delay("Please retry in 40.055756287s.") == pytest.approx(40.06, abs=0.01)
+    assert free_ai.retry_delay("nothing here") is None
 
 
 def test_ollama_tool_loop(monkeypatch):
@@ -178,3 +200,40 @@ def test_gemini_tools_without_parameters_omit_them():
     decls = {d["name"]: d for d in free_ai.Gemini(Config(), "k").tools[0]["functionDeclarations"]}
     assert "parameters" not in decls["read_screen"] and "parameters" not in decls["list_windows"]
     assert decls["click"]["parameters"]["required"] == ["target"]
+
+
+def test_memory_is_shared_when_gemini_hands_over_to_ollama(monkeypatch):
+    monkeypatch.setattr(computer, "switch_to_window", lambda name: None, raising=False)
+    gemini_post = FakePost(gemini_reply({"text": "Chrome it is. What are we looking at?"}),
+                           free_ai.HTTPError(429, "Please retry in 40s."),
+                           free_ai.HTTPError(429, "Please retry in 40s."))
+    ollama_post = FakePost({"message": {"role": "assistant", "content": "Still in Chrome, closing it now."}})
+    gemini = free_ai.Gemini(Config(), "k", post=gemini_post)
+    ollama = free_ai.Ollama(Config(), post=ollama_post)
+    brain = ai.Failover([gemini, ollama])
+
+    brain("let's work in chrome")
+    assert brain("close that tab") == "Still in Chrome, closing it now."
+    messages = ollama_post.requests[0][1]["messages"]
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1]["content"] == "let's work in chrome"
+    assert messages[2]["content"] == "Chrome it is. What are we looking at?"
+
+
+def test_ollama_json_written_as_text_is_run_not_spoken(monkeypatch):
+    closed = []
+    monkeypatch.setattr(computer, "close_app", lambda name: closed.append(name) or f"Closed {name}.")
+    post = FakePost(
+        {"message": {"role": "assistant", "content":
+            'I\'ll try again.\n\n{"name": "close_app", "parameters": {"name":"microsoft edge"}}'}},
+        {"message": {"role": "assistant", "content": "Edge is closed now."}},
+    )
+    o = free_ai.Ollama(Config(), post=post)
+    assert o("close edge") == "Edge is closed now."
+    assert closed == ["microsoft edge"]
+
+
+def test_clean_speech():
+    assert ai.clean_speech('Sure. {"name": "list_windows", "parameters": {}} Done!') == "Sure. Done!"
+    assert ai.clean_speech("**Closed** it.\n[Actions: close_app(x) -> Closed x.]") == "Closed it."
+    assert ai.clean_speech("See https://ai.google.dev/docs for more") == "See the link for more"

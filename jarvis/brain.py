@@ -44,6 +44,28 @@ def skill(*patterns: str):
     return decorator
 
 
+# What speech recognition typically hears instead of names Jarvis needs. Fixed before anything acts on it.
+CORRECTIONS = [
+    (r"\b(?:chachi|chachy|chatchi|chaji|chad ?g|chat ?g|cha) ?(?:p|pee|pt|bt|gpt|gbt|jeep(?:ee)?)\b"
+     r"|\bchat ?g ?p ?t\b|\bchad ?gpt\b", "ChatGPT"),
+    (r"\b(?:o|a)ll?amm?a\b|\bolama\b|\bo lama\b|\bollama\b", "Ollama"),
+    (r"\bhot ?star\b", "Hotstar"),
+    (r"\bnet ?flix\b", "Netflix"),
+    (r"\b(?:ip|a p i|app|api) keys\b", "API keys"),
+    (r"\b(?:ip|a p i|api) key\b", "API key"),
+    (r"\bmicrosoft edges\b", "Microsoft Edge"),
+    (r"\bsystem (?:citizens|settle?ings|setting)\b", "system settings"),
+    (r"\bg ?mail\b", "Gmail"),
+    (r"\byou ?tube\b", "YouTube"),
+]
+
+
+def fix_transcript(text: str) -> str:
+    for pattern, replacement in CORRECTIONS:
+        text = re.sub(pattern, replacement, text, flags=re.I)
+    return text
+
+
 # Words a spoken command or question typically starts with.
 COMMAND_START = (r"(?:what|what's|whats|how|who|when|why|which|can|could|would|will|please|open|close|launch|"
                  r"tell|say|play|type|press|search|write|send|turn|shut|restart|lock|call|set|show|give|"
@@ -92,7 +114,7 @@ class Brain:
         confirm, reply = self._pending, self._pending_reply
         self._pending = self._pending_reply = None
         try:
-            response = self._dispatch(text.strip().rstrip(".!?"), confirm, reply)
+            response = self._dispatch(fix_transcript(text.strip().rstrip(".!?")), confirm, reply)
         except ModuleNotFoundError as e:
             print(f"(error: {e!r})")
             response = Response(f"I'm missing the {e.name} package, {self.title}. "

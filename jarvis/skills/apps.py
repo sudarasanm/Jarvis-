@@ -13,6 +13,33 @@ def _complex(text: str, brain) -> bool:
     return brain.fallback is not None and bool(re.search(r"\b(and|then)\b", text))
 
 
+BROWSER = r"(?:(?:in|on|from)\s+(?:the\s+|my\s+)?(?P<browser>chrome|google chrome|brave|edge|microsoft edge|firefox))?"
+
+
+@skill(rf"^(?:list|show|tell me|what are|which are|read)\b.*\btabs?\b(?:\s+(?:open\s+)?{BROWSER})?(?:\s+open)?$",
+       r"^(?:what|which) tabs\b.*$")
+def tabs(m, brain):
+    browser = m.groupdict().get("browser")
+    return Response(screen.list_tabs(browser.split()[-1].lower() if browser else None))
+
+
+@skill(r"^close\s+(?:the\s+)?(?P<title>.+?)\s+(?:in|on|from)\s+(?:the\s+|my\s+)?"
+       r"(?P<browser>chrome|google chrome|brave|edge|microsoft edge|firefox)(?:\s+tabs?)?$",
+       rf"^close\s+(?:the\s+|my\s+)?(?P<title>.+?)\s+tab\s*{BROWSER}$",
+       rf"^close\s+(?:the\s+)?tab\s+(?:called\s+|named\s+)?(?P<title>.+?)\s*{BROWSER}$")
+def close_tab(m, brain):
+    if _complex(m["title"], brain):
+        return None
+    browser = m.groupdict().get("browser")
+    return Response(screen.close_tab(m["title"], browser.split()[-1].lower() if browser else None))
+
+
+@skill(rf"^(?:switch|go)\s+to\s+(?:the\s+)?(?P<title>.+?)\s+tab\s*{BROWSER}$")
+def switch_tab(m, brain):
+    browser = m.groupdict().get("browser")
+    return Response(screen.switch_to_tab(m["title"], browser.split()[-1].lower() if browser else None))
+
+
 @skill(r"\b(?:write|send|compose|draft)\b.*\be-?mail\b")
 def email(m, brain):
     if brain.fallback is not None:

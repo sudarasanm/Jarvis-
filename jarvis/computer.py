@@ -81,7 +81,14 @@ PROCESS_NAMES = {
     "powerpoint": ["powerpnt", "microsoft powerpoint"], "calculator": ["calculatorapp", "calculator", "calc"],
     "terminal": ["windowsterminal", "terminal"], "windows terminal": ["windowsterminal"],
     "command prompt": ["cmd"], "paint": ["mspaint"], "task manager": ["taskmgr"],
+    "brave": ["brave"], "firefox": ["firefox"], "ollama": ["ollama app", "ollama"],
+    "settings": ["systemsettings"], "system settings": ["systemsettings"], "chatgpt": ["chatgpt"],
+    "spotify": ["spotify"], "whatsapp": ["whatsapp"], "notepad": ["notepad"],
 }
+
+# Apps that may be holding unsaved work: never force-close these.
+SAVES_WORK = {"word", "microsoft word", "excel", "microsoft excel", "powerpoint", "notepad", "vs code",
+              "visual studio code", "paint", "outlook"}
 
 # Never close these: they would take down Windows' desktop, the OS, or Jarvis itself.
 PROTECTED = {"explorer", "file explorer", "files", "finder", "python", "pythonw", "jarvis", "yourself",
@@ -90,8 +97,8 @@ PROTECTED = {"explorer", "file explorer", "files", "finder", "python", "pythonw"
 
 def _normalize(name: str) -> str:
     name = name.lower().strip(" .!?,")
-    name = re.sub(r"^(the|my|a|an)\s+", "", name)
-    return re.sub(r"\s+(app|application|program|browser|window)$", "", name).strip()
+    name = re.sub(r"^(?:all\s+(?:of\s+)?)?(?:(?:the|my|a|an)\s+)?", "", name)
+    return re.sub(r"\s+(apps?|applications?|programs?|browsers?|windows?)$", "", name).strip()
 
 
 def open_url(url: str) -> None:
@@ -110,11 +117,71 @@ def open_website(name: str) -> str:
     return f"Opening {name}."
 
 
-def open_app(name: str, settle: float = 1.5) -> str:
-    """Open an app by its spoken name, falling back to a website of that name."""
+def _website_key(key: str) -> str | None:
+    if key in WEBSITES:
+        return key
+    squashed = key.replace(" ", "")
+    return next((k for k in WEBSITES if k.replace(" ", "") == squashed), None)
+
+
+# Words that mean speech recognition garbled the request ("open close the system").
+NOT_A_NAME = {"close", "open", "the", "a", "an", "and", "it", "this", "that", "something", "up", "all"}
+
+_installed: dict[str, str] | None = None
+
+
+def installed_apps(refresh: bool = False) -> dict[str, str]:
+    """Apps in the Windows Start menu: {'photoshop 2024': 'Adobe.Photoshop...'} (name lower-cased -> AppID)."""
+    global _installed
+    if _installed is not None and not refresh:
+        return _installed
+    _installed = {}
+    if SYSTEM != "Windows":
+        return _installed
+    import json
+
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-StartApps | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=20, creationflags=0x08000000,
+        ).stdout
+        apps = json.loads(out or "[]")
+        if isinstance(apps, dict):
+            apps = [apps]
+        _installed = {a["Name"].lower(): a["AppID"] for a in apps if a.get("Name") and a.get("AppID")}
+    except Exception as e:
+        print(f"(couldn't list installed apps: {e!r})")
+    return _installed
+
+
+def find_installed_app(name: str) -> tuple[str, str] | None:
+    """Best Start-menu match for a spoken app name: (name, AppID)."""
+    import difflib
+
     key = _normalize(name)
-    if key in WEBSITES or ("." in key and " " not in key):
-        return open_website(key)
+    apps = installed_apps()
+    if not key or not apps:
+        return None
+    if key in apps:
+        return key, apps[key]
+    words = [n for n in apps if re.search(rf"\b{re.escape(key)}\b", n)]
+    if words:
+        best = min(words, key=len)  # "word" -> "word" over "wordpad"; shortest full-word match
+        return best, apps[best]
+    close = difflib.get_close_matches(key, list(apps), n=1, cutoff=0.75)
+    return (close[0], apps[close[0]]) if close else None
+
+
+def open_app(name: str, settle: float = 1.5) -> str:
+    """Open an app or website by its spoken name. Never guesses wildly: says so if it can't find it."""
+    import difflib
+
+    key = _normalize(name)
+    if not key or key.split()[0] in NOT_A_NAME or all(w in NOT_A_NAME for w in key.split()):
+        return f"Sorry, I didn't catch what to open. You said: {name}."
+    site = _website_key(key)
+    if site or ("." in key and " " not in key):
+        return open_website(site or key)
 
     opened = False
     if SYSTEM == "Windows":
@@ -124,7 +191,11 @@ def open_app(name: str, settle: float = 1.5) -> str:
         if target:
             opened = _windows_start(target)
         if not opened:
-            opened = _windows_search_launch(key)
+            app = find_installed_app(key)
+            if app:
+                subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app[1]}"])
+                opened = True
+                name = app[0].title() if app[0] != key else name
     elif SYSTEM == "Darwin":
         app = MAC_APPS.get(key, name.title())
         opened = subprocess.run(["open", "-a", app], capture_output=True).returncode == 0
@@ -135,7 +206,14 @@ def open_app(name: str, settle: float = 1.5) -> str:
             opened = True
 
     if not opened:
-        return open_website(key)
+        # A near-miss of something we know ("hotstr" -> hotstar), or a one-word site name.
+        known = list(WEBSITES) + list(WINDOWS_APPS)
+        close = difflib.get_close_matches(key, known, n=1, cutoff=0.8)
+        if close and close[0] != key:
+            return open_app(close[0], settle)
+        if " " not in key and key.isalpha():
+            return open_website(key)
+        return f"I couldn't find an app or website called {name}."
     time.sleep(settle)  # give the window a moment so typing afterwards lands in it
     return f"Opening {name}."
 
@@ -150,20 +228,6 @@ def _windows_start(target: str) -> bool:
         return False
 
 
-def _windows_search_launch(name: str) -> bool:
-    """Open anything installed by typing its name into the Start menu, like a person would."""
-    try:
-        import pyautogui
-    except ImportError:
-        return False
-    pyautogui.press("win")
-    time.sleep(0.8)
-    pyautogui.write(name, interval=0.03)
-    time.sleep(1.0)
-    pyautogui.press("enter")
-    return True
-
-
 def _running(candidates: list[str]) -> list:
     import psutil
 
@@ -175,31 +239,64 @@ def _running(candidates: list[str]) -> list:
     return found
 
 
-def close_app(name: str) -> str:
+def _alive(procs: list) -> list:
+    return [p for p in procs if p.is_running()]
+
+
+def close_app(name: str, wait: float = 3.0) -> str:
+    """Close an app, window or browser tab by name, and only report success once it's really gone."""
+    from . import screen
+
     key = _normalize(name)
     if key in PROTECTED:
         return "I'd rather not close that one. It keeps the lights on."
-    candidates = PROCESS_NAMES.get(key, [key, key.replace(" ", "")])
+    if not key:
+        return "Close what?"
+    candidates = PROCESS_NAMES.get(key, [key, key.replace(" ", ""), f"{key} app"])
+
+    windows = screen.matching_windows(key) if SYSTEM == "Windows" else []
     try:
         procs = _running(candidates)
     except ImportError:
         return "I need the psutil package to close apps."
-    if not procs:
-        return f"{name.capitalize()} doesn't seem to be running."
 
-    if SYSTEM == "Windows":
-        # Without /F, taskkill asks windows to close politely, so apps can save and Chrome won't
-        # complain about a crash next time.
-        exes = {p.info["name"] for p in procs}
-        for exe in exes:
-            subprocess.run(["taskkill", "/IM", exe], capture_output=True)
-    elif SYSTEM == "Darwin":
-        app = MAC_APPS.get(key, name.title())
-        subprocess.run(["osascript", "-e", f'quit app "{app}"'], capture_output=True)
-    else:
-        for p in procs:
-            p.terminate()
-    return f"Closing {name}."
+    if not windows and not procs:
+        if SYSTEM == "Windows":  # maybe it's a browser tab ("close the Gmail tab")
+            tab = screen.find_tab(key)
+            if tab is not None:
+                return screen.close_tab(key)
+        return f"I can't see {name} open anywhere."
+
+    # 1. Politely: close its windows (like clicking X), so apps can save and browsers restore cleanly.
+    for w in windows:
+        try:
+            w.close()
+        except Exception:
+            pass
+    if SYSTEM == "Darwin" and procs:
+        subprocess.run(["osascript", "-e", f'quit app "{MAC_APPS.get(key, name.title())}"'], capture_output=True)
+    deadline = time.time() + (wait if windows or SYSTEM == "Darwin" else 0)  # windowless: nothing to wait for
+    while time.time() < deadline:
+        time.sleep(0.5)
+        left = screen.matching_windows(key) if SYSTEM == "Windows" else []
+        if not left and not (_alive(procs) and not windows):
+            return f"Closed {name}."
+
+    # 2. Still open. Apps with unsaved work are probably asking to save; don't force those.
+    if key in SAVES_WORK:
+        return f"{name.capitalize()} is still open. It's probably asking whether to save your work."
+    exes = {p.info["name"] for p in _alive(procs)}
+    for exe in exes:
+        if SYSTEM == "Windows":
+            subprocess.run(["taskkill", "/F", "/T", "/IM", exe], capture_output=True, creationflags=0x08000000)
+    if SYSTEM != "Windows":
+        for p in _alive(procs):
+            p.kill()
+    time.sleep(1.0)
+    left = screen.matching_windows(key) if SYSTEM == "Windows" else []
+    if left or _alive(procs):
+        return f"I couldn't close {name}. It may be running as administrator."
+    return f"Closed {name}."
 
 
 def type_text(text: str) -> str:

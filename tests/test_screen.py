@@ -254,3 +254,85 @@ def test_gemini_does_a_multi_step_screen_task(windows_desktop, monkeypatch):
     assert "Hyperlink: Amma" in screen_result
     assert g("Amma") == "Done, you're in Amma's profile."
     assert windows_desktop[-1] == (775, 475, 1, "left")
+
+
+# --- browser tabs -------------------------------------------------------------------------------
+
+class Node:
+    """A fake UI Automation element tree."""
+
+    def __init__(self, kind, name="", rect=(0, 0, 0, 0), children=()):
+        self.ControlTypeName, self.Name = f"{kind}Control", name
+        self.BoundingRectangle = Rect(*rect)
+        self.children = list(children)
+
+    def GetChildren(self):
+        return list(self.children)
+
+
+@pytest.fixture
+def browsers(monkeypatch):
+    """Chrome with three tabs (one showing extra hover text) and Brave with one, plus a fake keyboard/mouse."""
+    actions = []
+    chrome_strip = Node("Tab", children=[
+        Node("TabItem", "Inbox (9,937) - sudar@gmail.com - Gmail - Memory usage - 324 MB", (10, 5, 210, 35)),
+        Node("TabItem", "API keys | Claude Platform", (210, 5, 410, 35)),
+        Node("TabItem", "Ollama", (410, 5, 610, 35)),
+    ])
+    page = Node("Document", "Ollama", children=[Node("TabItem", "Fake tab inside a web page", (1, 1, 2, 2))])
+    chrome = Node("Window", children=[Node("Pane", children=[chrome_strip]), page])
+    brave = Node("Window", children=[Node("Tab", children=[Node("TabItem", "Netflix", (10, 5, 210, 35))])])
+    wins = [types.SimpleNamespace(title="Ollama - Google Chrome", _hWnd=1, visible=True, isMinimized=False,
+                                  activate=lambda: actions.append("activate chrome")),
+            types.SimpleNamespace(title="Netflix - Brave", _hWnd=2, visible=True, isMinimized=False,
+                                  activate=lambda: actions.append("activate brave"))]
+    roots = {1: chrome, 2: brave}
+
+    uia = types.ModuleType("uiautomation")
+    uia.ControlFromHandle = lambda h: roots[h]
+
+    def hotkey(*keys):
+        actions.append(("hotkey", keys))
+        if keys == ("ctrl", "w"):  # closes whichever tab was clicked last
+            x = actions_last_click[0]
+            chrome_strip.children[:] = [t for t in chrome_strip.children if t.BoundingRectangle.xcenter() != x]
+
+    actions_last_click = [None]
+
+    def click(x, y, clicks=1, interval=0, button="left"):
+        actions_last_click[0] = x
+        actions.append(("click", x, y))
+
+    monkeypatch.setitem(sys.modules, "uiautomation", uia)
+    monkeypatch.setitem(sys.modules, "pyautogui", types.SimpleNamespace(click=click, hotkey=hotkey, press=lambda k: None))
+    monkeypatch.setattr(screen, "SYSTEM", "Windows")
+    monkeypatch.setattr(screen, "_windows", lambda: wins)
+    monkeypatch.setattr(screen.time, "sleep", lambda s: None)
+    return actions
+
+
+def test_list_tabs_cleans_titles_and_skips_page_content(browsers):
+    assert screen.list_tabs() == ("Chrome has 3 tabs: Inbox (9,937) - sudar@gmail.com - Gmail; "
+                                  "API keys | Claude Platform; Ollama. Brave has 1 tab: Netflix.")
+    assert screen.list_tabs("brave") == "Brave has 1 tab: Netflix."
+
+
+def test_close_tab_by_partial_title_and_verifies(browsers):
+    assert screen.close_tab("ollama") == "Closed the Ollama tab."
+    assert ("click", 510, 20) in browsers and ("hotkey", ("ctrl", "w")) in browsers
+    assert screen.close_tab("claude api keys") == "Closed the API keys | Claude Platform tab."  # words in any order
+    assert screen.list_tabs("chrome") == "Chrome has 1 tab: Inbox (9,937) - sudar@gmail.com - Gmail."
+    assert "can't find" in screen.close_tab("hotstar")
+
+
+def test_tab_voice_commands(browsers):
+    b = Brain(Config())
+    assert b.handle("list the tabs in chrome").text.startswith("Chrome has 3 tabs")
+    assert b.handle("what tabs are open").text.startswith("Chrome has 3 tabs")
+    assert b.handle("switch to the gmail tab").text == "Switched to the Inbox (9,937) - sudar@gmail.com - Gmail tab."
+    assert b.handle("close olama in the Google Chrome tab").text == "Closed the Ollama tab."
+    assert b.handle("close the IP keys tab").text == "Closed the API keys | Claude Platform tab."
+
+
+def test_switch_window_falls_back_to_tab(browsers):
+    assert screen.switch_to_window("gmail").startswith("Switched to the Inbox")

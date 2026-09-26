@@ -21,7 +21,15 @@ INTERACTIVE = {"Button", "Hyperlink", "MenuItem", "TabItem", "ListItem", "CheckB
 READABLE = INTERACTIVE | {"Text", "Header", "HeaderItem"}
 
 # Windows that aren't really "open windows" from the user's point of view.
-HIDDEN_WINDOWS = {"program manager", "windows input experience", "settings", "microsoft text input application"}
+HIDDEN_WINDOWS = {"program manager", "windows input experience", "microsoft text input application"}
+
+# How each browser ends its window titles ("Gmail - Google Chrome").
+BROWSER_TITLES = {"chrome": "google chrome", "brave": "brave", "edge": "microsoft edge", "firefox": "mozilla firefox"}
+# Spoken names for windows whose titles say something else.
+WINDOW_ALIASES = {"system settings": "settings", "windows settings": "settings", "pc settings": "settings",
+                  "terminal": "powershell", "command prompt": "command prompt", "vs code": "visual studio code"}
+BROWSER_NAMES = {"chrome": "chrome", "google chrome": "chrome", "brave": "brave", "brave browser": "brave",
+                 "edge": "edge", "microsoft edge": "edge", "firefox": "firefox", "mozilla firefox": "firefox"}
 
 
 def make_dpi_aware() -> None:
@@ -52,11 +60,24 @@ class Element:
 
 # --- windows -------------------------------------------------------------------------------------
 
+def _own_console() -> int:
+    """Handle of the console window Jarvis runs in (0 if none), so it never closes itself."""
+    try:
+        import ctypes
+
+        return int(ctypes.windll.kernel32.GetConsoleWindow() or 0)
+    except Exception:
+        return 0
+
+
 def _windows():
     import pygetwindow  # installed with pyautogui on Windows
 
+    own = _own_console()
     wins = []
     for w in pygetwindow.getAllWindows():
+        if own and getattr(w, "_hWnd", None) == own:
+            continue
         title = (w.title or "").strip()
         if not title or title.lower() in HIDDEN_WINDOWS or not getattr(w, "visible", True):
             continue
@@ -66,23 +87,41 @@ def _windows():
     return wins
 
 
-def list_windows() -> str:
-    if SYSTEM != "Windows":
-        return "Listing windows only works on Windows for now."
-    titles = list(dict.fromkeys(w.title.strip() for w in _windows()))
-    if not titles:
-        return "No windows are open."
-    return "Open windows: " + "; ".join(titles)
+def clean_title(title: str) -> str:
+    return " ".join((title or "").replace("\u200b", "").split())
 
 
-def switch_to_window(name: str) -> str:
-    if SYSTEM != "Windows":
-        return "Switching windows only works on Windows for now."
-    wanted = name.lower().strip()
-    matches = [w for w in _windows() if wanted in w.title.lower()]
-    if not matches:
-        return f"I can't see a window called {name}."
-    win = matches[0]
+def browser_of(title: str) -> str | None:
+    """'Gmail - Google Chrome' -> 'chrome'."""
+    low = clean_title(title).lower()
+    for key, suffix in BROWSER_TITLES.items():
+        if low == suffix or low.endswith(" - " + suffix):
+            return key
+    return None
+
+
+def matching_windows(name: str) -> list:
+    """Open windows the user could mean by `name`.
+
+    A browser window only matches the browser's own name: "close Ollama" must not close Chrome just
+    because Chrome is showing an Ollama tab. Tabs are handled by close_tab().
+    """
+    wanted = _norm(name)
+    wanted = WINDOW_ALIASES.get(wanted, wanted)
+    browser = BROWSER_NAMES.get(wanted)
+    found = []
+    for w in _windows():
+        title = clean_title(w.title)
+        in_browser = browser_of(title)
+        if in_browser is not None:
+            if in_browser == browser:
+                found.append(w)
+        elif wanted and wanted in _norm(title):
+            found.append(w)
+    return found
+
+
+def activate(win) -> None:
     try:
         if getattr(win, "isMinimized", False):
             win.restore()
@@ -96,8 +135,33 @@ def switch_to_window(name: str) -> str:
             win.activate()
         except Exception:
             pass
-    time.sleep(0.5)
-    return f"Switched to {win.title.strip()}."
+    time.sleep(0.4)
+
+
+def list_windows() -> str:
+    if SYSTEM != "Windows":
+        return "Listing windows only works on Windows for now."
+    titles = list(dict.fromkeys(clean_title(w.title) for w in _windows()))
+    if not titles:
+        return "No windows are open."
+    return "Open windows: " + "; ".join(titles)
+
+
+def switch_to_window(name: str) -> str:
+    if SYSTEM != "Windows":
+        return "Switching windows only works on Windows for now."
+    matches = matching_windows(name)
+    if not matches:
+        wanted = _norm(name)
+        matches = [w for w in _windows() if wanted and wanted in _norm(w.title)]
+    if not matches:
+        tab = find_tab(name)
+        if tab is not None:
+            return switch_to_tab(name)
+        return f"I can't see a window called {name}."
+    win = matches[0]
+    activate(win)
+    return f"Switched to {clean_title(win.title)}."
 
 
 # --- reading the front window ----------------------------------------------------------------------
@@ -215,6 +279,141 @@ def scroll(direction: str = "down", amount: str = "normal") -> str:
     clicks = {"little": 3, "normal": 8, "lot": 20}.get(amount, 8)
     pyautogui.scroll(clicks * 120 if direction == "up" else -clicks * 120)
     return f"Scrolled {direction}."
+
+
+# --- browser tabs --------------------------------------------------------------------------------
+
+@dataclass
+class Tab:
+    browser: str
+    title: str
+    window: object
+    x: int
+    y: int
+
+
+TAB_NOISE = re.compile(r"\s+-\s+(memory usage\b.*|audio playing|pinned|network error.*|crashed|"
+                       r"this tab is playing (audio|media).*)$", re.I)
+
+
+def clean_tab_title(name: str) -> str:
+    name = clean_title(name)
+    while True:
+        cleaned = TAB_NOISE.sub("", name)
+        if cleaned == name:
+            return name
+        name = cleaned
+
+
+def _walk(control, max_depth: int, skip=("DocumentControl",)):
+    """Depth-first walk that doesn't descend into web page content (much faster in browsers)."""
+    stack = [(child, 1) for child in reversed(control.GetChildren())]
+    while stack:
+        node, depth = stack.pop()
+        yield node
+        try:
+            if depth < max_depth and node.ControlTypeName not in skip:
+                stack.extend((child, depth + 1) for child in reversed(node.GetChildren()))
+        except Exception:
+            continue
+
+
+def _window_control(win):
+    import uiautomation as auto
+
+    try:
+        control = auto.ControlFromHandle(int(win._hWnd))
+        if control is not None:
+            return control
+    except Exception:
+        pass
+    activate(win)
+    return auto.GetForegroundControl()
+
+
+def browser_tabs(browser: str | None = None) -> list[Tab]:
+    """Every tab in every open browser window (optionally one browser), in tab-strip order."""
+    if SYSTEM != "Windows":
+        return []
+    browser = BROWSER_NAMES.get(_norm(browser), browser) if browser else None
+    tabs = []
+    for win in _windows():
+        which = browser_of(win.title)
+        if which is None or (browser and which != browser):
+            continue
+        start = time.time()
+        for control in _walk(_window_control(win), max_depth=16):
+            if time.time() - start > 3:
+                break
+            try:
+                if control.ControlTypeName != "TabItemControl":
+                    continue
+                title = clean_tab_title(control.Name or "")
+                rect = control.BoundingRectangle
+                if title and rect.width() > 0:
+                    tabs.append(Tab(which, title, win, rect.xcenter(), rect.ycenter()))
+            except Exception:
+                continue
+    return tabs
+
+
+def list_tabs(browser: str | None = None) -> str:
+    if SYSTEM != "Windows":
+        return "Listing tabs only works on Windows for now."
+    tabs = browser_tabs(browser)
+    if not tabs:
+        return f"I can't see any {browser + ' ' if browser else ''}tabs open."
+    by_browser: dict[str, list[str]] = {}
+    for t in tabs:
+        by_browser.setdefault(t.browser, []).append(t.title)
+    names = {"chrome": "Chrome", "brave": "Brave", "edge": "Edge", "firefox": "Firefox"}
+    return " ".join(f"{names[b]} has {len(ts)} tab{'s' if len(ts) != 1 else ''}: " + "; ".join(ts) + "."
+                    for b, ts in by_browser.items())
+
+
+def find_tab(title: str, browser: str | None = None) -> Tab | None:
+    wanted = _norm(re.sub(r"\btabs?\b", "", title, flags=re.I))
+    if not wanted or SYSTEM != "Windows":
+        return None
+    try:
+        tabs = browser_tabs(browser)
+    except Exception:
+        return None
+    for test in (lambda n: n == wanted, lambda n: n.startswith(wanted), lambda n: wanted in n):
+        for t in tabs:
+            if test(_norm(t.title)):
+                return t
+    words = wanted.split()
+    for t in tabs:  # every word present, in any order: "claude api keys" -> "API keys | Claude Platform"
+        if len(words) > 1 and all(w in _norm(t.title) for w in words):
+            return t
+    return None
+
+
+def switch_to_tab(title: str, browser: str | None = None) -> str:
+    tab = find_tab(title, browser)
+    if tab is None:
+        return f"I can't find a tab called {title}."
+    activate(tab.window)
+    click_point(tab.x, tab.y)
+    return f"Switched to the {tab.title} tab."
+
+
+def close_tab(title: str, browser: str | None = None) -> str:
+    tab = find_tab(title, browser)
+    if tab is None:
+        return f"I can't find a tab called {title}."
+    import pyautogui
+
+    activate(tab.window)
+    click_point(tab.x, tab.y)
+    time.sleep(0.3)
+    pyautogui.hotkey("ctrl", "w")
+    time.sleep(0.6)
+    still_there = any(t.title == tab.title and t.window == tab.window for t in browser_tabs(tab.browser))
+    if still_there:
+        return f"I tried to close the {tab.title} tab, but it's still open."
+    return f"Closed the {tab.title} tab."
 
 
 # --- screenshots ---------------------------------------------------------------------------------

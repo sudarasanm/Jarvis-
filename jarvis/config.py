@@ -63,6 +63,8 @@ class Config:
     ai_provider: str = _setting_field("ai_provider", "auto")
     claude_model: str = _setting_field("claude_model", "claude-opus-5")
     gemini_model: str = _setting_field("gemini_model", "gemini-flash-latest")
+    # Tried when the main model's free limit is used up; each model has its own free quota.
+    gemini_backup_models: str = _setting_field("gemini_backup_models", "gemini-flash-lite-latest")
     ollama_model: str = _setting_field("ollama_model", "llama3.2")
     ollama_url: str = _setting_field("ollama_url", "http://localhost:11434")
     # Optional Ollama model that can see images (e.g. "llama3.2-vision"), used for looking at the

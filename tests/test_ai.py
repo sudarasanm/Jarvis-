@@ -45,8 +45,10 @@ def test_tool_loop_runs_tools_and_keeps_history(monkeypatch):
     assert tool_result == {"type": "tool_result", "tool_use_id": "t1", "content": "Opening chrome."}
 
     assert claude("what did I just ask?") == "You asked me to open Chrome."
-    # The second request carries the whole first turn, including the tool call and its result.
-    assert [m["role"] for m in client.requests[2]["messages"]] == ["user", "assistant", "user", "assistant", "user"]
+    # The next request carries the first turn as conversation, with a note of what was done.
+    messages = client.requests[2]["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+    assert messages[1]["content"] == "Chrome is open, sir.\n[Actions: open_app(chrome) -> Opening chrome.]"
 
 
 def test_tool_errors_are_reported_to_claude(monkeypatch):
@@ -78,7 +80,7 @@ def test_refusal_is_spoken_and_not_stored():
     client = FakeClient([reply("refusal")])
     claude = ai.Claude(Config(), client=client)
     assert "can't help" in claude("something")
-    assert claude.turns == []
+    assert claude.memory.turns == []
 
 
 def test_api_key_from_settings_file(monkeypatch):

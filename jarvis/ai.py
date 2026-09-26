@@ -14,8 +14,10 @@ runs out of credit or quota.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import re
 import time
 from datetime import datetime
 
@@ -29,34 +31,41 @@ Personality: calm, quick, dry British wit, fiercely loyal, and genuinely opinion
 not a search engine.
 - Hold real opinions and defend them. If {title} says something you think is wrong, or a plan is weak, push \
 back and explain why. Argue your corner with good reasons, and concede gracefully when they make the better point.
-- Keep the conversation alive: react to what they said, add a thought of your own, and usually finish with a \
+- Keep the conversation alive: react to what they said, add a thought of your own, and often finish with a \
 question back to them.
-- Remember what they told you earlier and bring it back up when it's relevant.
+- Remember what they told you and what you did earlier, and build on it. If they were working in Chrome, \
+"close that tab" means a Chrome tab.
 
-Speaking rules, because every word you write is read aloud:
+How to talk, because every word you write is read aloud:
+- Like a sharp, warm friend in the room, not a computer. Contractions, natural rhythm, no stock phrases.
 - Usually one to three short sentences. Go longer only when asked.
-- Plain spoken language. No markdown, lists, emoji, code or URLs.
-- Speech recognition makes mistakes. If a sentence is garbled, go with the likely meaning or ask.
+- Plain spoken words only: no markdown, lists, emoji, code, JSON, URLs, tool names or error codes.
+- Speech recognition makes mistakes ("chachi p" is ChatGPT, "olama" is Ollama). Go with the likely meaning; \
+if it makes no sense, ask what they meant rather than guessing.
+- For questions you can answer yourself ("what is a shared instance, give me an example"), answer directly \
+and clearly; offer to open the documentation, and open it if they want.
 
-You can operate the computer with your tools: open apps and websites, close apps, switch windows, type \
-into the focused window, press keys, click and scroll, check the weather, and draft emails. You can also see: \
-read_screen lists the buttons, links and text of the window in front (fast and exact), and look_at_screen \
-shows you a screenshot for anything read_screen misses, like profile pictures, video tiles or images.
-- For tasks inside apps and websites, work step by step like a person would: open it, wait for it to \
-load, read or look at the screen, click or type, then check the result before moving on. For example, to \
-play a film on Hotstar: open the Hotstar search page, wait, read the screen, click the film, click play.
-- When {title} asks what's on screen (the Netflix profiles, the accounts in Chrome, an answer on a web \
-page), read or look, then tell them. For accounts saved in Chrome, Brave or Edge, use browser_profiles.
-- Say briefly what you did. Emails are only drafted; {title} reviews and sends them.
-- Never type passwords or payment details and never buy anything; ask {title} to do those parts.
+You operate the computer with tools: open and close apps, list, switch and close browser tabs, switch \
+windows, type, press keys, click, scroll, check the weather and draft emails. You can also see: read_screen \
+lists the buttons, links and text of the window in front (fast, exact), and look_at_screen shows you a \
+screenshot for what read_screen misses (images, profile pictures, video tiles).
+- Honesty first: only say something worked if the tool result says so. If it failed, say what happened.
+- Never describe windows, tabs or the screen unless you read them in this turn. If you can't see, say so.
+- The "Right now" section below tells you what's open; use it instead of listing windows again.
+- Browser tabs are not windows: use list_tabs, switch_tab and close_tab for them.
+- For tasks inside apps and websites, work step by step like a person: open, wait for it to load, read or \
+look, click or type, and check the result. When you already know several steps, ask for them together.
+- Emails are only drafted; {title} reviews and sends them. Never type passwords or payment details and \
+never buy anything; ask {title} to do those parts.
 - Windows administrator prompts ("Do you want to allow this app to make changes") are protected by \
 Windows and no program can click them; ask {title} to click those.
-- If a tool reports a problem, say so plainly.
+- Notes in square brackets in earlier turns record actions you took. Use them, but never read them out.
 
 When {title} simply says your name or hello, you open the conversation: greet them in character, say \
 something that fits the time of day, and ask an engaging question or float an idea. Vary your openers.
 
 Current local time: {now}.
+{context}
 Latency-sensitive; begin your visible answer immediately."""
 
 TOOLS = [
@@ -82,7 +91,8 @@ TOOLS = [
     },
     {
         "name": "close_app",
-        "description": "Close a running application by name, e.g. 'chrome', 'notepad', 'spotify'.",
+        "description": "Close an application or window by name, e.g. 'chrome', 'settings', 'notepad'. "
+                       "Checks that it really closed. For a browser tab, use close_tab.",
         "input_schema": {
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -126,6 +136,34 @@ TOOLS = [
         "name": "list_windows",
         "description": "List the titles of all open windows.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_tabs",
+        "description": "List the open tabs in Chrome, Brave, Edge or Firefox (all browsers if none given).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]}},
+        },
+    },
+    {
+        "name": "switch_tab",
+        "description": "Bring a browser tab to the front by part of its title, e.g. 'Gmail', 'Netflix'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"},
+                           "browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]}},
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "close_tab",
+        "description": "Close a browser tab by part of its title, e.g. 'Ollama', 'API keys'. Checks it closed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"},
+                           "browser": {"type": "string", "enum": ["chrome", "brave", "edge", "firefox"]}},
+            "required": ["title"],
+        },
     },
     {
         "name": "switch_window",
@@ -224,6 +262,91 @@ MAX_HISTORY_TURNS = 20
 MAX_TOOL_ROUNDS = 25  # multi-step screen tasks need room: open, wait, read, click...
 
 
+class Memory:
+    """The conversation so far, shared by every brain, so switching from Gemini to Ollama keeps context."""
+
+    def __init__(self, max_turns: int = MAX_HISTORY_TURNS):
+        self.max_turns = max_turns
+        self.turns: list[tuple[str, str]] = []  # (what the user said, what Jarvis answered + action notes)
+
+    def add(self, user: str, reply: str, actions: list[str]) -> None:
+        if actions:
+            reply = f"{reply}\n[Actions: {'; '.join(actions)}]"
+        self.turns = (self.turns + [(user, reply)])[-self.max_turns:]
+
+
+def current_context() -> str:
+    """What's on screen right now, so the AI knows where the user is working without asking."""
+    if platform.system() != "Windows":
+        return ""
+    try:
+        wins = [screen.clean_title(w.title) for w in screen._windows()]
+        front = screen.foreground_title()
+    except Exception:
+        return ""
+    lines = ["Right now:"]
+    if front:
+        lines.append(f"- Window in front: {front}")
+    if wins:
+        lines.append("- Open windows: " + "; ".join(dict.fromkeys(wins[:20])))
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+JSON_CALL = re.compile(r'\{\s*"(?:name|function)"\s*:')
+
+
+def _json_objects(text: str):
+    """Yield (start, end, parsed) for each top-level {...} JSON object embedded in text."""
+    i = 0
+    while True:
+        start = text.find("{", i)
+        if start < 0:
+            return
+        depth, in_str, esc = 0, False, False
+        for j in range(start, len(text)):
+            ch = text[j]
+            if in_str:
+                esc = not esc and ch == "\\"
+                if ch == '"' and not esc:
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        yield start, j + 1, json.loads(text[start:j + 1])
+                    except ValueError:
+                        pass
+                    break
+        i = start + 1 if depth else j + 1
+
+
+def text_tool_calls(text: str) -> list[tuple[str, dict]]:
+    """Small local models sometimes write a tool call as JSON text instead of calling it. Recover those."""
+    names = {t["name"] for t in TOOLS}
+    calls = []
+    for _, _, obj in _json_objects(text or ""):
+        if isinstance(obj, dict) and obj.get("name") in names:
+            args = obj.get("parameters", obj.get("arguments", {}))
+            calls.append((obj["name"], args if isinstance(args, dict) else {}))
+    return calls
+
+
+def clean_speech(text: str) -> str:
+    """Strip anything that shouldn't be read aloud: JSON, code, action notes, markdown."""
+    text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
+    for start, end, obj in sorted(_json_objects(text), reverse=True):
+        text = text[:start] + " " + text[end:]
+    text = re.sub(r"\[Actions?:[^\]]*\]", " ", text)
+    text = re.sub(r"https?://\S+", "the link", text)
+    text = re.sub(r"[*_#`>]+", "", text)
+    return " ".join(text.split())
+
+
 class Assistant:
     """Shared by every brain: personality, tools, conversation memory and availability."""
 
@@ -231,7 +354,8 @@ class Assistant:
 
     def __init__(self, config: Config):
         self.config = config
-        self.turns: list[list] = []  # each turn: the user message, then assistant/tool messages
+        self.memory = Memory()  # replaced by one shared Memory when several brains work together
+        self.actions: list[str] = []  # what the tools did during the current turn
         self.unavailable_until = 0.0  # set when out of credit/quota, so make_brain() can switch
 
     @property
@@ -248,18 +372,24 @@ class Assistant:
             title=self.config.user_title,
             os={"Darwin": "Mac", "Windows": "Windows"}.get(platform.system(), platform.system()),
             now=datetime.now().strftime("%A %d %B %Y, %I:%M %p"),
+            context=current_context(),
         )
 
-    def history(self) -> list:
-        return [m for turn in self.turns for m in turn]
+    def past_turns(self) -> list[tuple[str, str]]:
+        return self.memory.turns
 
-    def remember(self, turn: list) -> None:
-        self.turns = (self.turns + [turn])[-MAX_HISTORY_TURNS:]
+    def finish(self, text: str, answer: str) -> str:
+        """Clean up the answer for speaking and remember the turn."""
+        answer = clean_speech(answer) or ("Done." if self.actions else "")
+        self.memory.add(text, answer, self.actions)
+        return answer
 
     def __call__(self, text: str) -> str | None:
+        self.actions = []
         return self._turn(text)
 
     def start_conversation(self) -> str | None:
+        self.actions = []
         return self._turn(f"{self.config.name}.")
 
     def _turn(self, text: str) -> str | None:
@@ -269,9 +399,12 @@ class Assistant:
         """Run one tool call; returns (result text, is_error)."""
         print(f"(tool: {name} {args})")
         try:
-            return self._dispatch(name, args or {}), False
+            result, is_error = self._dispatch(name, args or {}), False
         except Exception as e:
-            return f"Error: {e}", True
+            result, is_error = f"Error: {e}", True
+        summary = ", ".join(f"{v}" for v in (args or {}).values() if v not in (None, "", False))
+        self.actions.append(f"{name}({summary[:60]}) -> {str(result)[:100]}")
+        return result, is_error
 
     def _dispatch(self, name: str, args: dict) -> str:
         if name == "open_app":
@@ -290,6 +423,12 @@ class Assistant:
                                           client=self.config.email_client)
         if name == "list_windows":
             return screen.list_windows()
+        if name == "list_tabs":
+            return screen.list_tabs(args.get("browser"))
+        if name == "switch_tab":
+            return screen.switch_to_tab(args["title"], args.get("browser"))
+        if name == "close_tab":
+            return screen.close_tab(args["title"], args.get("browser"))
         if name == "switch_window":
             return screen.switch_to_window(args["name"])
         if name == "read_screen":
@@ -340,7 +479,9 @@ class Claude(Assistant):
         return bool(c.api_key or c.auth_token or c.credentials)
 
     def _turn(self, text: str) -> str | None:
-        history = self.history()
+        history = []
+        for user, reply in self.past_turns():
+            history += [{"role": "user", "content": user}, {"role": "assistant", "content": reply}]
         turn: list[dict] = [{"role": "user", "content": text}]
         try:
             for _ in range(MAX_TOOL_ROUNDS):
@@ -374,9 +515,8 @@ class Claude(Assistant):
         except self._anthropic.APIConnectionError:
             return "I can't reach my language servers right now. Check the internet connection."
 
-        self.remember(turn)
         answer = " ".join(b.text for b in response.content if b.type == "text").strip()
-        return answer or "Done."
+        return self.finish(text, answer) or "Done."
 
     def _create(self, messages: list[dict]):
         request = dict(model=self.config.claude_model, max_tokens=4096, system=self.system(),
@@ -424,6 +564,9 @@ class Failover:
 
     def __init__(self, brains: list[Assistant]):
         self.brains = brains
+        self.memory = Memory()
+        for brain in brains:
+            brain.memory = self.memory
 
     @property
     def names(self) -> str:

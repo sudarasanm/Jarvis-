@@ -54,22 +54,40 @@ def test_websites_open_in_browser(opened):
     assert opened == ["https://www.hotstar.com", "https://github.com"]
 
 
-def test_windows_open_known_app_and_unknown_via_start_menu(monkeypatch, fake_gui, opened):
-    started = []
+def test_windows_open_known_and_installed_apps(monkeypatch, opened):
+    started, launched = [], []
     monkeypatch.setattr(computer, "SYSTEM", "Windows")
     monkeypatch.setattr(computer, "_windows_start", lambda target: started.append(target) or True)
     monkeypatch.setattr(computer.time, "sleep", lambda s: None)
+    monkeypatch.setattr(computer.subprocess, "Popen", lambda cmd, **kw: launched.append(cmd))
+    monkeypatch.setattr(computer, "_installed", {"adobe photoshop 2024": "Adobe.Photoshop", "ollama": "Ollama.App",
+                                                 "wordpad": "WordPad", "microsoft word": "Word.App"})
 
     assert computer.open_app("Google Chrome") == "Opening Google Chrome."
     assert started == ["chrome"]
-
     monkeypatch.setattr(computer.shutil, "which", lambda cmd: None)
     computer.open_app("the terminal")
     assert started[-1] == "powershell"  # no Windows Terminal installed
 
-    computer.open_app("Photoshop")  # not in the list: typed into the Start menu
-    assert fake_gui == [("press", "win"), ("write", "photoshop"), ("press", "enter")]
+    monkeypatch.setattr(computer, "_windows_start", lambda target: False)
+    assert computer.open_app("photoshop") == "Opening Adobe Photoshop 2024."
+    assert launched[-1] == ["explorer.exe", "shell:AppsFolder\\Adobe.Photoshop"]
+    computer.open_app("ollama")
+    assert launched[-1][-1].endswith("Ollama.App")
+
+
+def test_open_never_acts_on_garbled_speech(monkeypatch, opened):
+    monkeypatch.setattr(computer, "SYSTEM", "Windows")
+    monkeypatch.setattr(computer, "_windows_start", lambda target: False)
+    monkeypatch.setattr(computer, "_installed", {})
+    monkeypatch.setattr(computer.time, "sleep", lambda s: None)
+    assert "didn't catch" in computer.open_app("close the")
+    assert "didn't catch" in computer.open_app("close the system")
+    assert "couldn't find" in computer.open_app("purple monkey dishwasher")
     assert opened == []
+    computer.open_app("chat gpt")  # spaced-out site names still work
+    computer.open_app("hotstr")    # near-miss of a known site
+    assert opened == ["https://chatgpt.com", "https://www.hotstar.com"]
 
 
 def test_close_app_protects_system_and_jarvis():
@@ -77,19 +95,97 @@ def test_close_app_protects_system_and_jarvis():
     assert "rather not" in computer.close_app("python")
 
 
-def test_close_app_not_running(monkeypatch):
-    monkeypatch.setattr(computer, "_running", lambda names: [])
-    assert "doesn't seem to be running" in computer.close_app("chrome")
+class FakeWindow:
+    def __init__(self, title, desktop, stubborn=False):
+        self.title, self.desktop, self.stubborn = title, desktop, stubborn
+
+    def close(self):
+        if not self.stubborn:
+            self.desktop.remove(self)
 
 
-def test_close_app_windows_uses_polite_taskkill(monkeypatch):
-    ran = []
-    proc = types.SimpleNamespace(info={"name": "chrome.exe"})
+@pytest.fixture
+def desktop(monkeypatch):
+    """A fake Windows desktop: windows can be closed (or refuse), processes can be force-killed."""
+    from jarvis import screen
+
+    wins, killed, procs = [], [], {}
     monkeypatch.setattr(computer, "SYSTEM", "Windows")
-    monkeypatch.setattr(computer, "_running", lambda names: [proc, proc])
-    monkeypatch.setattr(computer.subprocess, "run", lambda cmd, **kw: ran.append(cmd))
-    assert computer.close_app("chrome") == "Closing chrome."
-    assert ran == [["taskkill", "/IM", "chrome.exe"]]  # no /F: lets Chrome close cleanly
+    monkeypatch.setattr(screen, "SYSTEM", "Windows")
+    monkeypatch.setattr(screen, "_windows", lambda: list(wins))
+    clock = [1000.0]
+    monkeypatch.setattr(computer, "time", types.SimpleNamespace(time=lambda: clock[0],
+                                                                sleep=lambda s: clock.__setitem__(0, clock[0] + s)))
+
+    class Proc:
+        def __init__(self, exe):
+            self.info, self.dead = {"name": exe}, False
+
+        def is_running(self):
+            return not self.dead
+
+    def running(candidates):
+        return [p for n, p in procs.items() if n in candidates and not p.dead]
+
+    def taskkill(cmd, **kw):
+        killed.append(cmd)
+        exe = cmd[-1][:-4].lower()
+        if exe in procs:
+            procs[exe].dead = True
+            wins[:] = []
+
+    monkeypatch.setattr(computer, "_running", running)
+    monkeypatch.setattr(computer.subprocess, "run", taskkill)
+    monkeypatch.setattr(screen, "find_tab", lambda title, browser=None: None)
+    return types.SimpleNamespace(wins=wins, procs=procs, killed=killed, Proc=Proc)
+
+
+def test_close_app_closes_windows_politely_and_confirms(desktop):
+    desktop.wins += [FakeWindow("Inbox - Gmail - Google Chrome", desktop.wins),
+                     FakeWindow("Settings", desktop.wins)]
+    desktop.procs["chrome"] = desktop.Proc("chrome.exe")
+    assert computer.close_app("chrome") == "Closed chrome."
+    assert computer.close_app("system settings") == "Closed system settings."
+    assert desktop.wins == [] and desktop.killed == []  # no force needed
+
+
+def test_close_ollama_does_not_close_a_browser_showing_an_ollama_tab(desktop):
+    chrome = FakeWindow("Ollama - Google Chrome", desktop.wins)
+    desktop.wins.append(chrome)
+    assert computer.close_app("ollama") == "I can't see ollama open anywhere."
+    assert desktop.wins == [chrome]
+
+
+def test_close_app_forces_a_stubborn_browser_and_says_so_honestly(desktop):
+    desktop.wins.append(FakeWindow("New Tab - Microsoft​ Edge", desktop.wins, stubborn=True))
+    desktop.procs["msedge"] = desktop.Proc("msedge.exe")
+    assert computer.close_app("microsoft edge") == "Closed microsoft edge."
+    assert desktop.killed == [["taskkill", "/F", "/T", "/IM", "msedge.exe"]]
+
+
+def test_close_app_never_forces_apps_with_unsaved_work(desktop):
+    desktop.wins.append(FakeWindow("Report.docx - Word", desktop.wins, stubborn=True))
+    desktop.procs["winword"] = desktop.Proc("winword.exe")
+    assert "asking whether to save" in computer.close_app("word")
+    assert desktop.killed == []
+
+
+def test_close_app_background_process(desktop):
+    desktop.procs["ollama app"] = desktop.Proc("ollama app.exe")
+    assert computer.close_app("ollama") == "Closed ollama."
+    assert desktop.killed == [["taskkill", "/F", "/T", "/IM", "ollama app.exe"]]
+
+
+def test_close_app_falls_back_to_browser_tab(desktop, monkeypatch):
+    from jarvis import screen
+
+    monkeypatch.setattr(screen, "find_tab", lambda title, browser=None: "tab")
+    monkeypatch.setattr(screen, "close_tab", lambda title, browser=None: f"Closed the {title} tab.")
+    assert computer.close_app("gmail") == "Closed the gmail tab."
+
+
+def test_close_app_nothing_open(desktop):
+    assert computer.close_app("netflix") == "I can't see netflix open anywhere."
 
 
 def test_voice_commands_route_to_computer(monkeypatch, fake_gui, opened):
@@ -109,3 +205,10 @@ def test_multi_step_and_email_go_to_claude_when_available(fake_gui, opened):
     b.handle("write an email to my boss saying I'll be late")
     assert asked == ["open chrome and search for cricket scores", "write an email to my boss saying I'll be late"]
     assert opened == [] and fake_gui == []
+
+
+def test_normalize_drops_filler_words():
+    assert computer._normalize("all the Microsoft Edge") == "microsoft edge"
+    assert computer._normalize("the Microsoft edge Windows") == "microsoft edge"
+    assert computer._normalize("my Brave browser") == "brave"
+    assert computer._normalize("windows") == "windows"

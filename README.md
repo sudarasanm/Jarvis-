@@ -45,7 +45,8 @@ To update later: `git pull`, then run the installer again.
 |---|---|
 | "Jarvis" | start a conversation: chat, debate, brainstorm, ask anything |
 | "open chrome" / "open terminal" / "open hotstar" / "open photoshop" | open any app or website (unknown apps are found through the Start menu) |
-| "close chrome" / "close notepad" | close the app politely, so nothing is lost |
+| "close chrome" / "close settings" / "close notepad" | close the app politely, check it really closed, and force it if it's stuck (never forces apps with unsaved work) |
+| "list the tabs in Chrome" / "close the Gmail tab" / "close Ollama in Chrome" / "switch to the Netflix tab" | manage browser tabs (Chrome, Brave, Edge, Firefox) |
 | "click Allow" / "click on Amma" / "double click Recycle Bin" / "right click ..." | click things on screen by name (finds them exactly, or looks at the screen) |
 | "scroll down" / "scroll up a lot" | scroll |
 | "what windows are open" / "switch to Brave" | list or switch windows |
@@ -106,7 +107,8 @@ Edit `%USERPROFILE%\.jarvis.json` (on Mac/Linux `~/.jarvis.json`), then restart 
 | `ai_provider` | `auto` | Brain to try first: `gemini`, `ollama`, `claude` (others are backups) |
 | `gemini_api_key` | | Free Gemini key (or set `GEMINI_API_KEY`) |
 | `gemini_model` | `gemini-flash-latest` | Gemini model |
-| `ollama_model` | `llama3.2` | Ollama model (e.g. `qwen2.5:7b` on a stronger PC) |
+| `gemini_backup_models` | `gemini-flash-lite-latest` | Used when the main model's free limit runs out (each has its own quota) |
+| `ollama_model` | `llama3.2` | Ollama model. With 16 GB+ RAM, `qwen2.5:7b` is much smarter (`ollama pull qwen2.5:7b`) |
 | `ollama_vision_model` | | Ollama model that can see the screen when there's no Gemini key (e.g. `llama3.2-vision`) |
 | `anthropic_api_key` | | Claude API key (or set `ANTHROPIC_API_KEY`) |
 | `language` | `en-US` | Speech recognition language |

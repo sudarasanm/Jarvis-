@@ -27,16 +27,19 @@ class VisionUnavailable(RuntimeError):
 
 
 def _gemini(config: Config, prompt: str, image: bytes, json_reply: bool = False) -> str:
-    from .free_ai import Gemini, gemini_key, post_json
+    from .free_ai import GeminiUnavailable, gemini_generate
 
-    key = gemini_key()
     body = {"contents": [{"role": "user", "parts": [
         {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(image).decode()}},
         {"text": prompt},
     ]}]}
     if json_reply:
         body["generationConfig"] = {"responseMimeType": "application/json"}
-    data = post_json(Gemini.URL.format(model=config.gemini_model), body, {"x-goog-api-key": key})
+    try:
+        data = gemini_generate(config, body)
+    except GeminiUnavailable as e:
+        raise VisionUnavailable("I can't see the screen right now: Gemini's free limit is used up "
+                                f"for about {e.seconds:.0f} seconds.") from None
     parts = data["candidates"][0]["content"]["parts"]
     return " ".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
 
